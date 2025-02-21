@@ -1,0 +1,11 @@
+services:
+  meridian:
+    build: .
+    container_name: meridian-container
+    ports:
+      - "8888:8888"
+    environment:
+      - MERIDIAN_DEBUG=true
+    volumes:
+      - ./:/app
+    working_dir: /app
