@@ -75,8 +75,8 @@ class Summarizer:
       self,
       filename: str,
       filepath: str,
-      start_date: tc.Date | None = None,
-      end_date: tc.Date | None = None,
+      start_date: tc.Date = None,
+      end_date: tc.Date = None,
   ):
     """Generates and saves the HTML results summary output.
 
@@ -85,7 +85,7 @@ class Summarizer:
       filepath: The path to the directory where the file will be saved.
       start_date: Optional start date selector, *inclusive*, in _yyyy-mm-dd_
         format.
-      end_date: Optional end date selector, *exclusive* in _yyyy-mm-dd_ format.
+      end_date: Optional end date selector, *inclusive* in _yyyy-mm-dd_ format.
     """
     os.makedirs(filepath, exist_ok=True)
     with open(os.path.join(filepath, filename), 'w') as f:
@@ -93,8 +93,8 @@ class Summarizer:
 
   def _gen_model_results_summary(
       self,
-      start_date: tc.Date | None = None,
-      end_date: tc.Date | None = None,
+      start_date: tc.Date = None,
+      end_date: tc.Date = None,
   ) -> str:
     """Generate HTML results summary output (as sanitized content str)."""
     all_dates = self._meridian.input_data.time_coordinates.all_dates
@@ -128,8 +128,12 @@ class Summarizer:
     template_env.globals[c.START_DATE] = start_date.strftime(
         f'%b {start_date.day}, %Y'
     )
-    template_env.globals[c.END_DATE] = end_date.strftime(
-        f'%b {end_date.day}, %Y'
+
+    interval_days = self._meridian.input_data.time_coordinates.interval_days
+    end_date_adjusted = end_date + pd.Timedelta(days=interval_days)
+
+    template_env.globals[c.END_DATE] = end_date_adjusted.strftime(
+        f'%b {end_date_adjusted.day}, %Y'
     )
 
     html_template = template_env.get_template('summary.html.jinja')
@@ -163,7 +167,9 @@ class Summarizer:
         self._create_model_fit_card_html(
             template_env, selected_times=selected_times
         ),
-        self._create_outcome_contrib_card_html(template_env, media_summary),
+        self._create_outcome_contrib_card_html(
+            template_env, media_summary, selected_times=selected_times
+        ),
         self._create_performance_breakdown_card_html(
             template_env, media_summary
         ),
@@ -263,9 +269,41 @@ class Summarizer:
       self,
       template_env: jinja2.Environment,
       media_summary: visualizer.MediaSummary,
+      selected_times: Sequence[str] | None,
   ) -> str:
     """Creates the HTML snippet for the Outcome Contrib card."""
     outcome = self._kpi_or_revenue()
+
+    num_selected_times = (
+        self._meridian.n_times
+        if selected_times is None
+        else len(selected_times)
+    )
+    time_granularity = (
+        c.WEEKLY
+        if num_selected_times < c.QUARTERLY_SUMMARY_THRESHOLD_WEEKS
+        else c.QUARTERLY
+    )
+
+    channel_contrib_area_chart = formatter.ChartSpec(
+        id=summary_text.CHANNEL_CONTRIB_BY_TIME_CHART_ID,
+        description=summary_text.CHANNEL_CONTRIB_BY_TIME_CHART_DESCRIPTION.format(
+            outcome=outcome
+        ),
+        chart_json=media_summary.plot_channel_contribution_area_chart(
+            time_granularity=time_granularity
+        ).to_json(),
+    )
+
+    channel_contrib_bump_chart = formatter.ChartSpec(
+        id=summary_text.CHANNEL_CONTRIB_RANK_CHART_ID,
+        description=summary_text.CHANNEL_CONTRIB_RANK_CHART_DESCRIPTION.format(
+            outcome=outcome
+        ),
+        chart_json=media_summary.plot_channel_contribution_bump_chart(
+            time_granularity=time_granularity
+        ).to_json(),
+    )
     channel_drivers_chart = formatter.ChartSpec(
         id=summary_text.CHANNEL_DRIVERS_CHART_ID,
         description=summary_text.CHANNEL_DRIVERS_CHART_DESCRIPTION.format(
@@ -304,6 +342,8 @@ class Summarizer:
             channel_drivers_chart,
             spend_outcome_chart,
             outcome_contribution_chart,
+            channel_contrib_area_chart,
+            channel_contrib_bump_chart,
         ],
     )
 
@@ -314,7 +354,7 @@ class Summarizer:
       ascending: bool = False,
   ) -> pd.DataFrame:
     return (
-        media_summary.paid_summary_metrics[metrics]
+        media_summary.get_paid_summary_metrics()[metrics]
         .sel(distribution=c.POSTERIOR, metric=c.MEAN)
         .drop_sel(channel=c.ALL_CHANNELS)
         .to_dataframe()
@@ -330,7 +370,7 @@ class Summarizer:
       ascending: bool = False,
   ) -> pd.DataFrame:
     return (
-        media_summary.paid_summary_metrics[metrics]
+        media_summary.get_paid_summary_metrics()[metrics]
         .sel(distribution=c.POSTERIOR, metric=c.MEDIAN)
         .drop_sel(channel=c.ALL_CHANNELS)
         .to_dataframe()
@@ -475,7 +515,7 @@ class Summarizer:
     rf_channels = reach_frequency.optimal_frequency_data.rf_channel
     assert rf_channels.size > 0
     # This will raise KeyError if not all `rf_channels` can be found in here:
-    rf_channel_spends = media_summary.paid_summary_metrics[c.SPEND].sel(
+    rf_channel_spends = media_summary.get_paid_summary_metrics()[c.SPEND].sel(
         channel=rf_channels
     )
     most_spend_rf_channel = rf_channel_spends.idxmax()

@@ -13,10 +13,10 @@
 # limitations under the License.
 
 from collections.abc import Collection, Mapping, Sequence
+import dataclasses
 import os
 from unittest import mock
 import warnings
-
 from absl import flags
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -235,16 +235,112 @@ class ModelTest(
           self._N_TIMES, knots, is_national
       )
 
-  def test_validate_paid_media_prior_type(self):
+  def test_validate_media_prior_type_mroi(self):
     with self.assertRaisesWithLiteralMatch(
         ValueError,
-        "Custom priors should be set on `mroi_m` and `mroi_rf` when KPI is"
-        " non-revenue and revenue per kpi data is missing.",
+        "Custom priors should be set on `mroi_m` when `media_prior_type` is"
+        ' "mroi", KPI is non-revenue and revenue per kpi data is missing.',
     ):
       model.Meridian(
           input_data=self.input_data_non_revenue_no_revenue_per_kpi,
           model_spec=spec.ModelSpec(
-              paid_media_prior_type=constants.PAID_MEDIA_PRIOR_TYPE_MROI
+              media_prior_type=constants.TREATMENT_PRIOR_TYPE_MROI
+          ),
+      )
+
+  def test_validate_rf_prior_type_mroi(self):
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        "Custom priors should be set on `mroi_rf` when `rf_prior_type` is"
+        ' "mroi", KPI is non-revenue and revenue per kpi data is missing.',
+    ):
+      model.Meridian(
+          input_data=self.input_data_media_and_rf_non_revenue_no_revenue_per_kpi,
+          model_spec=spec.ModelSpec(
+              rf_prior_type=constants.TREATMENT_PRIOR_TYPE_MROI
+          ),
+      )
+
+  def test_validate_media_prior_type_roi(self):
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        "Custom priors should be set on `roi_m` when `media_prior_type` is"
+        ' "roi", custom priors are assigned on `{constants.ROI_RF}` or'
+        ' `rf_prior_type` is not "roi", KPI is non-revenue and revenue per kpi'
+        " data is missing.",
+    ):
+      model.Meridian(
+          input_data=self.input_data_media_and_rf_non_revenue_no_revenue_per_kpi,
+          model_spec=spec.ModelSpec(
+              media_prior_type=constants.TREATMENT_PRIOR_TYPE_ROI,
+              rf_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
+          ),
+      )
+
+  def test_validate_rf_prior_type_roi(self):
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        'Custom priors should be set on `roi_rf` when `rf_prior_type` is "roi",'
+        " custom priors are assigned on `{constants.ROI_M}` or"
+        ' `media_prior_type` is not "roi", KPI is non-revenue and revenue per'
+        " kpi data is missing.",
+    ):
+      model.Meridian(
+          input_data=self.input_data_media_and_rf_non_revenue_no_revenue_per_kpi,
+          model_spec=spec.ModelSpec(
+              rf_prior_type=constants.TREATMENT_PRIOR_TYPE_ROI,
+              media_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
+          ),
+      )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="roi_m",
+          prior_dist=prior_distribution.PriorDistribution(
+              roi_m=tfp.distributions.Normal(
+                  [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], 0.9, name=constants.ROI_M
+              )
+          ),
+          dist_name=constants.ROI_M,
+      ),
+      dict(
+          testcase_name="roi_rf",
+          prior_dist=prior_distribution.PriorDistribution(
+              roi_rf=tfp.distributions.Normal(0.0, 0.9, name=constants.ROI_RF)
+          ),
+          dist_name=constants.ROI_RF,
+      ),
+      dict(
+          testcase_name="mroi_m",
+          prior_dist=prior_distribution.PriorDistribution(
+              mroi_m=tfp.distributions.Normal(0.5, 0.9, name=constants.MROI_M)
+          ),
+          dist_name=constants.MROI_M,
+      ),
+      dict(
+          testcase_name="mroi_rf",
+          prior_dist=prior_distribution.PriorDistribution(
+              mroi_rf=tfp.distributions.Normal(
+                  [0.0, 0.0, 0.0, 0.0], 0.9, name=constants.MROI_RF
+              )
+          ),
+          dist_name=constants.MROI_RF,
+      ),
+  )
+  def test_check_for_negative_effect(
+      self, prior_dist: prior_distribution.PriorDistribution, dist_name: str
+  ):
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        "Media priors must have non-negative support when"
+        ' `media_effects_dist`="log_normal". Found negative effect in'
+        f" {dist_name}.",
+    ):
+      model.Meridian(
+          input_data=self.input_data_with_media_and_rf,
+          model_spec=spec.ModelSpec(
+              media_effects_dist=constants.MEDIA_EFFECTS_LOG_NORMAL,
+              prior=prior_dist,
           ),
       )
 
@@ -252,7 +348,7 @@ class ModelTest(
     meridian = model.Meridian(
         input_data=self.input_data_non_revenue_no_revenue_per_kpi,
         model_spec=spec.ModelSpec(
-            paid_media_prior_type=constants.PAID_MEDIA_PRIOR_TYPE_COEFFICIENT
+            media_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT
         ),
     )
     # Compare input data.
@@ -262,7 +358,7 @@ class ModelTest(
 
     # Create sample model spec for comparison
     sample_spec = spec.ModelSpec(
-        paid_media_prior_type=constants.PAID_MEDIA_PRIOR_TYPE_COEFFICIENT
+        media_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT
     )
 
     # Compare model spec.
@@ -392,10 +488,13 @@ class ModelTest(
               )
           },
           ignored_priors="beta_m",
-          paid_media_prior_type=constants.PAID_MEDIA_PRIOR_TYPE_ROI,
+          media_prior_type=constants.TREATMENT_PRIOR_TYPE_ROI,
+          rf_prior_type=constants.TREATMENT_PRIOR_TYPE_ROI,
+          wrong_prior_type_var_name="media_prior_type",
+          wrong_prior_type=constants.TREATMENT_PRIOR_TYPE_ROI,
       ),
       dict(
-          testcase_name="custom_mroi_m_mroi_rf_prior_type_roi",
+          testcase_name="custom_mroi_rf_prior_type_roi",
           custom_distributions={
               constants.MROI_M: tfp.distributions.LogNormal(
                   0.2, 0.8, name=constants.MROI_M
@@ -404,24 +503,30 @@ class ModelTest(
                   0.2, 0.8, name=constants.MROI_RF
               ),
           },
-          ignored_priors="mroi_m, mroi_rf",
-          paid_media_prior_type=constants.PAID_MEDIA_PRIOR_TYPE_ROI,
+          ignored_priors="mroi_rf",
+          media_prior_type=constants.TREATMENT_PRIOR_TYPE_MROI,
+          rf_prior_type=constants.TREATMENT_PRIOR_TYPE_ROI,
+          wrong_prior_type_var_name="rf_prior_type",
+          wrong_prior_type=constants.TREATMENT_PRIOR_TYPE_ROI,
       ),
       dict(
-          testcase_name="custom_beta_m_beta_rf_roi_m_prior_type_mroi",
+          testcase_name="custom_beta_m_roi_m_prior_type_mroi",
           custom_distributions={
               constants.BETA_M: tfp.distributions.LogNormal(
-                  0.7, 0.9, name=constants.ROI_M
+                  0.7, 0.9, name=constants.BETA_M
               ),
               constants.BETA_RF: tfp.distributions.LogNormal(
-                  0.8, 0.9, name=constants.ROI_RF
+                  0.8, 0.9, name=constants.BETA_RF
               ),
               constants.ROI_M: tfp.distributions.LogNormal(
                   0.2, 0.1, name=constants.ROI_M
               ),
           },
-          ignored_priors="beta_m, beta_rf, roi_m",
-          paid_media_prior_type=constants.PAID_MEDIA_PRIOR_TYPE_MROI,
+          ignored_priors="beta_m, roi_m",
+          media_prior_type=constants.TREATMENT_PRIOR_TYPE_MROI,
+          rf_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
+          wrong_prior_type_var_name="media_prior_type",
+          wrong_prior_type=constants.TREATMENT_PRIOR_TYPE_MROI,
       ),
       dict(
           testcase_name="custom_roi_rf_prior_type_coefficient",
@@ -431,14 +536,20 @@ class ModelTest(
               )
           },
           ignored_priors="roi_rf",
-          paid_media_prior_type=constants.PAID_MEDIA_PRIOR_TYPE_COEFFICIENT,
+          media_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
+          rf_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
+          wrong_prior_type_var_name="rf_prior_type",
+          wrong_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
       ),
   )
   def test_warn_setting_ignored_priors(
       self,
       custom_distributions: Mapping[str, tfp.distributions.Distribution],
       ignored_priors: str,
-      paid_media_prior_type: str,
+      media_prior_type: str,
+      rf_prior_type: str,
+      wrong_prior_type_var_name: str,
+      wrong_prior_type: str,
   ):
     # Create prior distribution with given parameters.
     distribution = prior_distribution.PriorDistribution(**custom_distributions)
@@ -447,17 +558,19 @@ class ModelTest(
       model.Meridian(
           input_data=self.input_data_with_media_and_rf,
           model_spec=spec.ModelSpec(
-              prior=distribution, paid_media_prior_type=paid_media_prior_type
+              prior=distribution,
+              media_prior_type=media_prior_type,
+              rf_prior_type=rf_prior_type,
           ),
       )
-      self.assertTrue(
-          any(
+      self.assertLen(w, 1)
+      self.assertEqual(
+          (
               f"Custom prior(s) `{ignored_priors}` are ignored when"
-              " `paid_media_prior_type` is set to"
-              f' "{paid_media_prior_type}".'
-              in str(warning.message)
-              for warning in w
-          )
+              f" `{wrong_prior_type_var_name}` is set to"
+              f' "{wrong_prior_type}".'
+          ),
+          str(w[0].message),
       )
 
   def test_base_geo_properties(self):
@@ -698,6 +811,12 @@ class ModelTest(
           dims_bad=np.array([b"control_0", b"control_1"]),
       ),
       dict(
+          testcase_name="wrong_non_media_treatments",
+          dataset=test_utils.DATASET_WITHOUT_TIME_VARIATION_IN_NON_MEDIA_TREATMENTS,
+          data_name=constants.NON_MEDIA_TREATMENTS,
+          dims_bad=np.array([b"non_media_channel_0", b"non_media_channel_1"]),
+      ),
+      dict(
           testcase_name="wrong_media",
           dataset=test_utils.DATASET_WITHOUT_TIME_VARIATION_IN_MEDIA,
           data_name=constants.MEDIA,
@@ -708,6 +827,18 @@ class ModelTest(
           dataset=test_utils.DATASET_WITHOUT_TIME_VARIATION_IN_REACH,
           data_name=constants.REACH,
           dims_bad=np.array([b"rf_channel_0", b"rf_channel_1"]),
+      ),
+      dict(
+          testcase_name="wrong_organic_media",
+          dataset=test_utils.DATASET_WITHOUT_TIME_VARIATION_IN_ORGANIC_MEDIA,
+          data_name=constants.ORGANIC_MEDIA,
+          dims_bad=np.array([b"organic_media_channel_0"]),
+      ),
+      dict(
+          testcase_name="wrong_organic_rf",
+          dataset=test_utils.DATASET_WITHOUT_TIME_VARIATION_IN_ORGANIC_REACH,
+          data_name=constants.ORGANIC_REACH,
+          dims_bad=np.array([b"organic_rf_channel_1"]),
       ),
   )
   def test_init_without_time_variation_fails(
@@ -727,6 +858,116 @@ class ModelTest(
               dataset, kpi_type=constants.NON_REVENUE
           )
       )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="rf_prior_type_roi",
+          media_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
+          rf_prior_type=constants.TREATMENT_PRIOR_TYPE_ROI,
+          error_msg=(
+              "`population_scaled_kpi` cannot be constant with `rf_prior_type`"
+              ' = "roi".'
+          ),
+      ),
+      dict(
+          testcase_name="media_prior_type_mroi",
+          media_prior_type=constants.TREATMENT_PRIOR_TYPE_MROI,
+          rf_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
+          error_msg=(
+              "`population_scaled_kpi` cannot be constant with"
+              ' `media_prior_type` = "mroi".'
+          ),
+      ),
+  )
+  def test_init_validate_kpi_transformer(
+      self, media_prior_type: str, rf_prior_type: str, error_msg: str
+  ):
+    valid_input_data = self.input_data_with_media_and_rf
+    kpi = valid_input_data.kpi
+    kpi.data = np.zeros_like(kpi.data)
+    zero_kpi_input_data = dataclasses.replace(
+        valid_input_data,
+        kpi=kpi,
+    )
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        error_msg,
+    ):
+      model.Meridian(
+          input_data=zero_kpi_input_data,
+          model_spec=spec.ModelSpec(
+              media_prior_type=media_prior_type,
+              rf_prior_type=rf_prior_type,
+          ),
+      )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="media_prior_type_roi",
+          media_prior_type=constants.TREATMENT_PRIOR_TYPE_ROI,
+          error_msg='`kpi` cannot be constant with `media_prior_type` = "roi".',
+      ),
+      dict(
+          testcase_name="media_prior_type_mroi",
+          media_prior_type=constants.TREATMENT_PRIOR_TYPE_MROI,
+          error_msg=(
+              '`kpi` cannot be constant with `media_prior_type` = "mroi".'
+          ),
+      ),
+  )
+  def test_init_validate_kpi_transformer_national_model(
+      self, media_prior_type: str, error_msg: str
+  ):
+    valid_input_data = self.national_input_data_media_only
+    kpi = valid_input_data.kpi
+    kpi.data = np.zeros_like(kpi.data)
+    zero_kpi_input_data = dataclasses.replace(
+        valid_input_data,
+        kpi=kpi,
+    )
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        error_msg,
+    ):
+      model.Meridian(
+          input_data=zero_kpi_input_data,
+          model_spec=spec.ModelSpec(
+              media_prior_type=media_prior_type,
+          ),
+      )
+
+  def test_init_validate_kpi_transformer_ok(self):
+    valid_input_data = self.input_data_with_media_and_rf
+    kpi = valid_input_data.kpi
+    kpi.data = np.zeros_like(kpi.data)
+    zero_kpi_input_data = dataclasses.replace(
+        valid_input_data,
+        kpi=kpi,
+    )
+    meridian = model.Meridian(
+        input_data=zero_kpi_input_data,
+        model_spec=spec.ModelSpec(
+            media_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
+            rf_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
+        ),
+    )
+
+    valid_national_input_data = self.national_input_data_media_only
+    national_kpi = valid_national_input_data.kpi
+    national_kpi.data = np.zeros_like(national_kpi.data)
+    zero_kpi_national_input_data = dataclasses.replace(
+        valid_national_input_data,
+        kpi=national_kpi,
+    )
+    national_meridian = model.Meridian(
+        input_data=zero_kpi_national_input_data,
+        model_spec=spec.ModelSpec(
+            media_prior_type=constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
+        ),
+    )
+
+    self.assertIsNotNone(meridian)
+    self.assertIsNotNone(national_meridian)
 
   def test_broadcast_prior_distribution_is_called_in_meridian_init(self):
     meridian = model.Meridian(input_data=self.input_data_with_media_and_rf)
@@ -824,6 +1065,30 @@ class ModelTest(
     self.assertEqual(mock_kwargs["set_total_media_contribution_prior"], True)
     self.assertEqual(mock_kwargs["kpi"], np.sum(meridian.input_data.kpi))
     np.testing.assert_allclose(mock_kwargs["total_spend"], expected_total_spend)
+
+  def test_default_roi_prior_distribution_raises_warning(
+      self,
+  ):
+    with warnings.catch_warnings(record=True) as warns:
+      # Cause all warnings to always be triggered.
+      warnings.simplefilter("always")
+
+      meridian = model.Meridian(
+          input_data=self.input_data_non_revenue_no_revenue_per_kpi,
+      )
+
+      _ = meridian.prior_broadcast
+      self.assertLen(warns, 1)
+      for w in warns:
+        self.assertTrue(issubclass(w.category, UserWarning))
+        self.assertIn(
+            "Consider setting custom ROI priors, as kpi_type was specified as"
+            " `non_revenue` with no `revenue_per_kpi` being set. Otherwise, the"
+            " total media contribution prior will be used with `p_mean=0.4` and"
+            " `p_sd=0.2`. Further documentation available at "
+            " https://developers.google.com/meridian/docs/advanced-modeling/unknown-revenue-kpi-custom#set-total-paid-media-contribution-prior",
+            str(w.message),
+        )
 
   def test_scaled_data_shape(self):
     meridian = model.Meridian(input_data=self.input_data_with_media_and_rf)
@@ -1398,13 +1663,13 @@ class NonPaidModelTest(
             " from the input data."
         ),
     )
-    self.assertIsNotNone(meridian.non_media_treatments_scaled)
+    self.assertIsNotNone(meridian.non_media_treatments_normalized)
     self.assertIsNotNone(
         self.input_data_non_media_and_organic.non_media_treatments
     )
     # pytype: disable=attribute-error
     self.assertAllEqual(
-        meridian.non_media_treatments_scaled.shape,
+        meridian.non_media_treatments_normalized.shape,
         self.input_data_non_media_and_organic.non_media_treatments.shape,
         msg=(
             "Shape of `_non_media_treatments_scaled` does not match the shape"
@@ -1447,7 +1712,8 @@ class NonPaidModelTest(
             len(self.input_data_non_media_and_organic.non_media_channel),
         ],
         msg=(
-            "Shape of `non_media_transformer._population_scaling_factors` does"
+            "Shape of"
+            " `non_media_transformer._population_scaling_factors` does"
             " not match (`n_geos`, `n_non_media_channels`)."
         ),
     )
@@ -1468,7 +1734,7 @@ class NonPaidModelTest(
     # pytype: disable=attribute-error
     self.assertAllClose(
         meridian.non_media_transformer.inverse(
-            meridian.non_media_treatments_scaled
+            meridian.non_media_treatments_normalized
         ),
         self.input_data_non_media_and_organic.non_media_treatments,
         atol=atol,
@@ -1513,6 +1779,7 @@ class NonPaidModelTest(
             roi_m=tfp.distributions.Deterministic(0),
             roi_rf=tfp.distributions.Deterministic(0),
         ),
+        media_effects_dist=constants.MEDIA_EFFECTS_NORMAL,
     )
     meridian = model.Meridian(
         input_data=self.short_input_data_non_media,
@@ -1530,9 +1797,9 @@ class NonPaidModelTest(
 
   @parameterized.product(
       paid_media_prior_type=[
-          constants.PAID_MEDIA_PRIOR_TYPE_ROI,
-          constants.PAID_MEDIA_PRIOR_TYPE_MROI,
-          constants.PAID_MEDIA_PRIOR_TYPE_COEFFICIENT,
+          constants.TREATMENT_PRIOR_TYPE_ROI,
+          constants.TREATMENT_PRIOR_TYPE_MROI,
+          constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
       ],
       media_effects_dist=[
           constants.MEDIA_EFFECTS_NORMAL,
@@ -1543,7 +1810,8 @@ class NonPaidModelTest(
       self, paid_media_prior_type: str, media_effects_dist: str
   ):
     model_spec = spec.ModelSpec(
-        paid_media_prior_type=paid_media_prior_type,
+        media_prior_type=paid_media_prior_type,
+        rf_prior_type=paid_media_prior_type,
         media_effects_dist=media_effects_dist,
     )
     meridian = model.Meridian(
@@ -1608,12 +1876,12 @@ class NonPaidModelTest(
         constants.SLOPE_ORF,
         constants.SIGMA,
     ]
-    if paid_media_prior_type == constants.PAID_MEDIA_PRIOR_TYPE_ROI:
+    if paid_media_prior_type == constants.TREATMENT_PRIOR_TYPE_ROI:
       derived_params.append(constants.BETA_M)
       derived_params.append(constants.BETA_RF)
       prior_distribution_params.append(constants.ROI_M)
       prior_distribution_params.append(constants.ROI_RF)
-    elif paid_media_prior_type == constants.PAID_MEDIA_PRIOR_TYPE_MROI:
+    elif paid_media_prior_type == constants.TREATMENT_PRIOR_TYPE_MROI:
       derived_params.append(constants.BETA_M)
       derived_params.append(constants.BETA_RF)
       prior_distribution_params.append(constants.MROI_M)
@@ -1709,7 +1977,7 @@ class NonPaidModelTest(
         )
         + tf.einsum(
             "gtn,gn->gt",
-            meridian.non_media_treatments_scaled,
+            meridian.non_media_treatments_normalized,
             par[constants.GAMMA_GN][0, :, :],
         )
     )
@@ -1896,6 +2164,255 @@ class NonPaidModelTest(
           model_spec=model_spec,
           inference_data=inference_data,
       )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="sigma_dims_unique_sigma",
+          coord=constants.GEO,
+          mismatched_priors={
+              constants.BETA_GOM: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+                  input_data_samples._N_ORGANIC_MEDIA_CHANNELS,
+              ),
+              constants.BETA_GORF: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+                  input_data_samples._N_ORGANIC_RF_CHANNELS,
+              ),
+              constants.GAMMA_GN: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+                  input_data_samples._N_NON_MEDIA_CHANNELS,
+              ),
+              constants.GAMMA_GC: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+                  input_data_samples._N_CONTROLS,
+              ),
+              constants.TAU_G: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+                  input_data_samples._N_CONTROLS,
+              ),
+              constants.TAU_G_EXCL_BASELINE: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+              ),
+              constants.BETA_GM: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+                  input_data_samples._N_MEDIA_CHANNELS,
+              ),
+              constants.BETA_GRF: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+                  input_data_samples._N_RF_CHANNELS,
+              ),
+              constants.BETA_GOM_DEV: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+                  input_data_samples._N_ORGANIC_MEDIA_CHANNELS,
+              ),
+              constants.BETA_GORF_DEV: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+                  input_data_samples._N_ORGANIC_RF_CHANNELS,
+              ),
+              constants.GAMMA_GN_DEV: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+                  input_data_samples._N_NON_MEDIA_CHANNELS,
+              ),
+              constants.GAMMA_GC_DEV: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+                  input_data_samples._N_CONTROLS,
+              ),
+              constants.SIGMA: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  input_data_samples._N_GEOS + 1,
+              ),
+          },
+          mismatched_coord_size=input_data_samples._N_GEOS + 1,
+          expected_coord_size=input_data_samples._N_GEOS,
+          unique_sigma=True,
+      ),
+      dict(
+          testcase_name="sigma_dims_not_unique_sigma",
+          coord=constants.SIGMA_DIM,
+          mismatched_priors={
+              constants.SIGMA: (
+                  1,
+                  input_data_samples._N_DRAWS,
+                  2,
+              ),
+          },
+          mismatched_coord_size=2,
+          expected_coord_size=1,
+          unique_sigma=False,
+      ),
+  )
+  def test_validate_injected_inference_data_prior_incorrect_sigma_coordinates(
+      self,
+      coord,
+      mismatched_priors,
+      mismatched_coord_size,
+      expected_coord_size,
+      unique_sigma,
+  ):
+    """Checks validation fails with incorrect coordinates for sigma."""
+    model_spec = spec.ModelSpec(unique_sigma_for_each_geo=unique_sigma)
+    meridian = model.Meridian(
+        input_data=self.input_data_non_media_and_organic,
+        model_spec=model_spec,
+    )
+    prior_samples = meridian.prior_sampler_callable._sample_prior(self._N_DRAWS)
+    prior_coords = meridian.create_inference_data_coords(1, self._N_DRAWS)
+    prior_dims = meridian.create_inference_data_dims()
+
+    prior_samples = dict(prior_samples)
+    for param in mismatched_priors:
+      prior_samples[param] = tf.zeros(mismatched_priors[param])
+    prior_coords = dict(prior_coords)
+    prior_coords[coord] = np.arange(mismatched_coord_size)
+    if unique_sigma:
+      prior_coords[constants.GEO] = np.arange(mismatched_coord_size)
+    else:
+      prior_coords[constants.SIGMA_DIM] = np.arange(mismatched_coord_size)
+
+    inference_data = az.convert_to_inference_data(
+        prior_samples,
+        coords=prior_coords,
+        dims=prior_dims,
+        group=constants.PRIOR,
+    )
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "Injected inference data prior has incorrect coordinate"
+        f" '{coord}': expected"
+        f" {expected_coord_size}, got"
+        f" {mismatched_coord_size}",
+    ):
+      _ = model.Meridian(
+          input_data=self.input_data_non_media_and_organic,
+          model_spec=model_spec,
+          inference_data=inference_data,
+      )
+
+  def test_compute_non_media_treatments_baseline_wrong_baseline_values_shape_raises_exception(
+      self,
+  ):
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        "The number of non-media channels (2) does not match the number of"
+        " baseline values (3).",
+    ):
+      mmm = model.Meridian(
+          input_data=self.input_data_non_media_and_organic,
+          model_spec=spec.ModelSpec(
+              non_media_baseline_values=["min", "max", "min"]
+          ),
+      )
+      _ = mmm.compute_non_media_treatments_baseline()
+
+  def test_compute_non_media_treatments_baseline_fails_with_wrong_baseline_type(
+      self,
+  ):
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        "Invalid non_media_baseline_values value: 'wrong'. Only"
+        " float numbers and strings 'min' and 'max' are supported.",
+    ):
+      mmm = model.Meridian(
+          input_data=self.input_data_non_media_and_organic,
+          model_spec=spec.ModelSpec(
+              non_media_baseline_values=[
+                  "max",
+                  "wrong",
+              ]
+          ),
+      )
+      _ = mmm.compute_non_media_treatments_baseline()
+
+  def test_compute_non_media_treatments_baseline_default(self):
+    """Tests default baseline calculation (all 'min')."""
+    meridian = model.Meridian(
+        input_data=self.input_data_non_media_and_organic,
+        model_spec=spec.ModelSpec(non_media_baseline_values=None),
+    )
+    non_media_treatments = meridian.non_media_treatments
+    expected_baseline = tf.reduce_min(non_media_treatments, axis=[0, 1])
+    actual_baseline = meridian.compute_non_media_treatments_baseline()
+    self.assertAllClose(expected_baseline, actual_baseline)
+
+  def test_compute_non_media_treatments_baseline_strings(self):
+    """Tests baseline calculation with 'min' and 'max' strings."""
+    meridian = model.Meridian(
+        input_data=self.input_data_non_media_and_organic,
+        model_spec=spec.ModelSpec(
+            non_media_baseline_values=["min", "max"]
+        ),
+    )
+    non_media_treatments = meridian.non_media_treatments
+    expected_baseline_min = tf.reduce_min(
+        non_media_treatments[..., 0], axis=[0, 1]
+    )
+    expected_baseline_max = tf.reduce_max(
+        non_media_treatments[..., 1], axis=[0, 1]
+    )
+    expected_baseline = tf.stack(
+        [expected_baseline_min, expected_baseline_max], axis=-1
+    )
+    actual_baseline = meridian.compute_non_media_treatments_baseline()
+    self.assertAllClose(expected_baseline, actual_baseline)
+
+  def test_compute_non_media_treatments_baseline_floats(self):
+    """Tests baseline calculation with float values."""
+    baseline_values = [10.5, -2.3]
+    meridian = model.Meridian(
+        input_data=self.input_data_non_media_and_organic,
+        model_spec=spec.ModelSpec(
+            non_media_baseline_values=baseline_values
+        ),
+    )
+    expected_baseline = tf.cast(baseline_values, tf.float32)
+    actual_baseline = meridian.compute_non_media_treatments_baseline()
+    self.assertAllClose(expected_baseline, actual_baseline)
+
+  def test_compute_non_media_treatments_baseline_mixed(self):
+    """Tests baseline calculation with mixed float and string values."""
+    baseline_values = ["min", 5.0]
+    meridian = model.Meridian(
+        input_data=self.input_data_non_media_and_organic,
+        model_spec=spec.ModelSpec(
+            non_media_baseline_values=baseline_values
+        ),
+    )
+    non_media_treatments = meridian.non_media_treatments
+    expected_baseline_min = tf.reduce_min(
+        non_media_treatments[..., 0], axis=[0, 1]
+    )
+    expected_baseline_float = tf.cast(baseline_values[1], tf.float32)
+    expected_baseline = tf.stack(
+        [expected_baseline_min, expected_baseline_float], axis=-1
+    )
+    actual_baseline = meridian.compute_non_media_treatments_baseline()
+    self.assertAllClose(expected_baseline, actual_baseline)
 
 
 if __name__ == "__main__":

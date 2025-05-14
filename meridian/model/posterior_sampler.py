@@ -110,7 +110,7 @@ class PosteriorMCMCSampler:
     organic_media_tensors = mmm.organic_media_tensors
     organic_rf_tensors = mmm.organic_rf_tensors
     controls_scaled = mmm.controls_scaled
-    non_media_treatments_scaled = mmm.non_media_treatments_scaled
+    non_media_treatments_normalized = mmm.non_media_treatments_normalized
     media_effects_dist = mmm.media_effects_dist
     adstock_hill_media_fn = mmm.adstock_hill_media
     adstock_hill_rf_fn = mmm.adstock_hill_rf
@@ -167,9 +167,9 @@ class PosteriorMCMCSampler:
             ec=ec_m,
             slope=slope_m,
         )
-        prior_type = mmm.model_spec.paid_media_prior_type
+        prior_type = mmm.model_spec.effective_media_prior_type
         if prior_type in constants.PAID_MEDIA_ROI_PRIOR_TYPES:
-          if prior_type == constants.PAID_MEDIA_PRIOR_TYPE_ROI:
+          if prior_type == constants.TREATMENT_PRIOR_TYPE_ROI:
             roi_or_mroi_m = yield prior_broadcast.roi_m
           else:
             roi_or_mroi_m = yield prior_broadcast.mroi_m
@@ -220,9 +220,9 @@ class PosteriorMCMCSampler:
             slope=slope_rf,
         )
 
-        prior_type = mmm.model_spec.paid_media_prior_type
+        prior_type = mmm.model_spec.effective_rf_prior_type
         if prior_type in constants.PAID_MEDIA_ROI_PRIOR_TYPES:
-          if prior_type == constants.PAID_MEDIA_PRIOR_TYPE_ROI:
+          if prior_type == constants.TREATMENT_PRIOR_TYPE_ROI:
             roi_or_mroi_rf = yield prior_broadcast.roi_rf
           else:
             roi_or_mroi_rf = yield prior_broadcast.mroi_rf
@@ -349,7 +349,7 @@ class PosteriorMCMCSampler:
             gamma_n + xi_n * gamma_gn_dev, name=constants.GAMMA_GN
         )
         y_pred = y_pred_combined_media + tf.einsum(
-            "gtn,gn->gt", non_media_treatments_scaled, gamma_gn
+            "gtn,gn->gt", non_media_treatments_normalized, gamma_gn
         )
       else:
         y_pred = y_pred_combined_media
@@ -393,7 +393,7 @@ class PosteriorMCMCSampler:
       max_energy_diff: float = 500.0,
       unrolled_leapfrog_steps: int = 1,
       parallel_iterations: int = 10,
-      seed: Sequence[int] | None = None,
+      seed: Sequence[int] | int | None = None,
       **pins,
   ) -> az.InferenceData:
     """Runs Markov Chain Monte Carlo (MCMC) sampling of posterior distributions.
@@ -441,9 +441,10 @@ class PosteriorMCMCSampler:
         trajectory length implied by `max_tree_depth`. Defaults is `1`.
       parallel_iterations: Number of iterations allowed to run in parallel. Must
         be a positive integer. For more information, see `tf.while_loop`.
-      seed: Used to set the seed for reproducible results. For more information,
-        see [PRNGS and seeds]
-        (https://github.com/tensorflow/probability/blob/main/PRNGS.md).
+      seed: An `int32[2]` Tensor or a Python list or tuple of 2 `int`s, which
+        will be treated as stateless seeds; or a Python `int` or `None`, which
+        will be treated as stateful seeds. See [tfp.random.sanitize_seed]
+        (https://www.tensorflow.org/probability/api_docs/python/tfp/random/sanitize_seed).
       **pins: These are used to condition the provided joint distribution, and
         are passed directly to `joint_dist.experimental_pin(**pins)`.
 
@@ -457,7 +458,14 @@ class PosteriorMCMCSampler:
         [ResourceExhaustedError when running Meridian.sample_posterior]
         (https://developers.google.com/meridian/docs/advanced-modeling/model-debugging#gpu-oom-error).
     """
-    seed = tfp.random.sanitize_seed(seed) if seed else None
+    if seed is not None and isinstance(seed, Sequence) and len(seed) != 2:
+      raise ValueError(
+          "Invalid seed: Must be either a single integer (stateful seed) or a"
+          " pair of two integers (stateless seed). See"
+          " [tfp.random.sanitize_seed](https://www.tensorflow.org/probability/api_docs/python/tfp/random/sanitize_seed)"
+          " for details."
+      )
+    seed = tfp.random.sanitize_seed(seed) if seed is not None else None
     n_chains_list = [n_chains] if isinstance(n_chains, int) else n_chains
     total_chains = np.sum(n_chains_list)
 
@@ -486,6 +494,8 @@ class PosteriorMCMCSampler:
             " integers as `n_chains` to sample chains serially (see"
             " https://developers.google.com/meridian/docs/advanced-modeling/model-debugging#gpu-oom-error)"
         ) from error
+      if seed is not None:
+        seed += 1
       states.append(mcmc.all_states._asdict())
       traces.append(mcmc.trace)
 

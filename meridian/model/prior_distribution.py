@@ -740,43 +740,19 @@ class PriorDistribution:
         self.sigma, sigma_shape, name=constants.SIGMA
     )
 
-    default_distribution = PriorDistribution()
-    if set_total_media_contribution_prior and distributions_are_equal(
-        self.roi_m, default_distribution.roi_m
-    ):
-      warnings.warn(
-          'Consider setting custom ROI priors, as kpi_type was specified as'
-          ' `non_revenue` with no `revenue_per_kpi` being set. Otherwise, the'
-          ' total media contribution prior will be used with'
-          f' `p_mean={constants.P_MEAN}` and `p_sd={constants.P_SD}`. Further'
-          ' documentation available at '
-          ' https://developers.google.com/meridian/docs/advanced-modeling/unknown-revenue-kpi-custom#set-total-paid-media-contribution-prior',
-      )
+    if set_total_media_contribution_prior:
       roi_m_converted = _get_total_media_contribution_prior(
           kpi, total_spend, constants.ROI_M
-      )
-    else:
-      roi_m_converted = self.roi_m
-    roi_m = tfp.distributions.BatchBroadcast(
-        roi_m_converted, n_media_channels, name=constants.ROI_M
-    )
-
-    if set_total_media_contribution_prior and distributions_are_equal(
-        self.roi_rf, default_distribution.roi_rf
-    ):
-      warnings.warn(
-          'Consider setting custom ROI priors, as kpi_type was specified as'
-          ' `non_revenue` with no `revenue_per_kpi` being set. Otherwise, the'
-          ' total media contribution prior will be used with'
-          f' `p_mean={constants.P_MEAN}` and `p_sd={constants.P_SD}`. Further'
-          ' documentation available at '
-          ' https://developers.google.com/meridian/docs/advanced-modeling/unknown-revenue-kpi-custom#set-total-paid-media-contribution-prior',
       )
       roi_rf_converted = _get_total_media_contribution_prior(
           kpi, total_spend, constants.ROI_RF
       )
     else:
+      roi_m_converted = self.roi_m
       roi_rf_converted = self.roi_rf
+    roi_m = tfp.distributions.BatchBroadcast(
+        roi_m_converted, n_media_channels, name=constants.ROI_M
+    )
     roi_rf = tfp.distributions.BatchBroadcast(
         roi_rf_converted, n_rf_channels, name=constants.ROI_RF
     )

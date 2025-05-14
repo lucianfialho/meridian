@@ -37,7 +37,7 @@ def _sample_names(prefix: str, n_names: int | None) -> list[str] | None:
   return [prefix + str(n) for n in range(n_names)] if n_names else None
 
 
-def _sample_geos(
+def sample_geos(
     n_geos: int | None, integer_geos: bool = False
 ) -> list[str] | list[int] | None:
   """Generates a list of sample geos."""
@@ -65,11 +65,23 @@ _REQUIRED_COORDS = immutabledict.immutabledict({
     c.MEDIA_TIME: _sample_times(n_times=3),
     c.CONTROL_VARIABLE: ['control_0', 'control_1'],
 })
+_NON_MEDIA_COORDS = immutabledict.immutabledict(
+    {c.NON_MEDIA_CHANNEL: ['non_media_channel_0', 'non_media_channel_1']}
+)
 _MEDIA_COORDS = immutabledict.immutabledict(
     {c.MEDIA_CHANNEL: ['media_channel_0', 'media_channel_1', 'media_channel_2']}
 )
+_ORGANIC_MEDIA_COORDS = immutabledict.immutabledict({
+    c.ORGANIC_MEDIA_CHANNEL: [
+        'organic_media_channel_0',
+        'organic_media_channel_1',
+    ]
+})
 _RF_COORDS = immutabledict.immutabledict(
     {c.RF_CHANNEL: ['rf_channel_0', 'rf_channel_1']}
+)
+_ORGANIC_RF_COORDS = immutabledict.immutabledict(
+    {c.ORGANIC_RF_CHANNEL: ['organic_rf_channel_0', 'organic_rf_channel_1']}
 )
 
 _REQUIRED_DATA_VARS = immutabledict.immutabledict({
@@ -376,6 +388,70 @@ DATASET_WITHOUT_TIME_VARIATION_IN_REACH = xr.Dataset(
     },
 )
 
+DATASET_WITHOUT_TIME_VARIATION_IN_ORGANIC_MEDIA = xr.Dataset(
+    coords=_REQUIRED_COORDS
+    | _MEDIA_COORDS
+    | _RF_COORDS
+    | _ORGANIC_MEDIA_COORDS,
+    data_vars=_REQUIRED_DATA_VARS
+    | _MEDIA_DATA_VARS
+    | _RF_DATA_VARS
+    | _OPTIONAL_DATA_VARS
+    | {
+        c.ORGANIC_MEDIA: (
+            ['geo', 'media_time', 'organic_media_channel'],
+            [
+                [[2.1, 2.2], [2.1, 2.21], [2.1, 2.2]],
+                [[2.7, 2.8], [2.7, 2.8], [2.7, 2.8]],
+            ],
+        ),
+    },
+)
+
+DATASET_WITHOUT_TIME_VARIATION_IN_ORGANIC_REACH = xr.Dataset(
+    coords=_REQUIRED_COORDS
+    | _MEDIA_COORDS
+    | _RF_COORDS
+    | _ORGANIC_RF_COORDS,
+    data_vars=_REQUIRED_DATA_VARS
+    | _MEDIA_DATA_VARS
+    | _RF_DATA_VARS
+    | _OPTIONAL_DATA_VARS
+    | {
+        c.ORGANIC_REACH: (
+            ['geo', 'media_time', 'organic_rf_channel'],
+            [
+                [[2.1, 2.2], [2.11, 2.2], [2.1, 2.2]],
+                [[2.7, 2.8], [2.7, 2.8], [2.7, 2.8]],
+            ],
+        ),
+        c.ORGANIC_FREQUENCY: (
+            ['geo', 'media_time', 'organic_rf_channel'],
+            [
+                [[7.1, 7.2], [7.3, 7.4], [7.5, 7.6]],
+                [[7.11, 7.21], [7.31, 7.41], [7.51, 7.61]],
+            ],
+        ),
+    },
+)
+
+DATASET_WITHOUT_TIME_VARIATION_IN_NON_MEDIA_TREATMENTS = xr.Dataset(
+    coords=_REQUIRED_COORDS | _MEDIA_COORDS | _RF_COORDS | _NON_MEDIA_COORDS,
+    data_vars=_REQUIRED_DATA_VARS
+    | _MEDIA_DATA_VARS
+    | _RF_DATA_VARS
+    | _OPTIONAL_DATA_VARS
+    | {
+        c.NON_MEDIA_TREATMENTS: (
+            ['geo', 'time', 'non_media_channel'],
+            [
+                [[2.1, 2.2], [2.1, 2.2], [2.1, 2.2]],
+                [[2.7, 2.8], [2.7, 2.8], [2.7, 2.8]],
+            ],
+        ),
+    },
+)
+
 _NATIONAL_COORDS = immutabledict.immutabledict({
     c.TIME: [
         _SAMPLE_START_DATE.strftime(c.DATE_FORMAT),
@@ -519,6 +595,7 @@ def random_media_da(
     n_media_channels: int,
     seed: int = 0,
     date_format: str = c.DATE_FORMAT,
+    explicit_geo_names: Sequence[str] | None = None,
     explicit_time_index: Sequence[str] | None = None,
     explicit_media_channel_names: Sequence[str] | None = None,
     array_name: str = 'media',
@@ -535,6 +612,7 @@ def random_media_da(
     n_media_channels: Number of media channels
     seed: Random seed used by `np.random.seed()`
     date_format: The date format to use for time coordinate labels
+    explicit_geo_names: If given, ignore `n_geos` and use this as is.
     explicit_time_index: If given, ignore `date_format` and use this as is
     explicit_media_channel_names: If given, ignore `n_media_channels` and use
       this as is
@@ -558,6 +636,11 @@ def random_media_da(
           np.random.normal(5, 5, size=(n_geos, n_media_times, n_media_channels))
       )
   )
+  if explicit_geo_names is None:
+    geos = sample_geos(n_geos, integer_geos)
+  else:
+    geos = explicit_geo_names
+
   if explicit_time_index is None:
     media_time = _sample_times(
         n_times=n_media_times,
@@ -576,7 +659,7 @@ def random_media_da(
       media,
       dims=['geo', 'media_time', channel_variable_name],
       coords={
-          'geo': _sample_geos(n_geos, integer_geos),
+          'geo': geos,
           'media_time': media_time,
           channel_variable_name: media_channels,
       },
@@ -647,7 +730,7 @@ def random_media_spend_nd_da(
   coords = {}
   if n_geos is not None:
     dims.append('geo')
-    coords['geo'] = _sample_geos(n_geos, integer_geos)
+    coords['geo'] = sample_geos(n_geos, integer_geos)
   if n_times is not None:
     dims.append('time')
     coords['time'] = _sample_times(n_times=n_times)
@@ -719,7 +802,7 @@ def random_controls_da(
       controls,
       dims=['geo', 'time', 'control_variable'],
       coords={
-          'geo': _sample_geos(n_geos, integer_geos),
+          'geo': sample_geos(n_geos, integer_geos),
           'time': (
               _sample_times(n_times=n_times, date_format=date_format)
               if explicit_time_index is None
@@ -775,7 +858,7 @@ def random_kpi_da(
       kpi,
       dims=['geo', 'time'],
       coords={
-          'geo': _sample_geos(n_geos, integer_geos),
+          'geo': sample_geos(n_geos, integer_geos),
           'time': _sample_times(n_times=n_times),
       },
       name=c.KPI,
@@ -796,7 +879,7 @@ def constant_revenue_per_kpi(
       revenue_per_kpi,
       dims=['geo', 'time'],
       coords={
-          'geo': _sample_geos(n_geos, integer_geos),
+          'geo': sample_geos(n_geos, integer_geos),
           'time': _sample_times(n_times=n_times),
       },
       name='revenue_per_kpi',
@@ -815,7 +898,7 @@ def random_population(
   return xr.DataArray(
       population,
       dims=['geo'],
-      coords={'geo': _sample_geos(n_geos, integer_geos)},
+      coords={'geo': sample_geos(n_geos, integer_geos)},
       name='population',
   )
 
@@ -857,7 +940,7 @@ def random_reach_da(
       reach,
       dims=['geo', 'media_time', channel_variable_name],
       coords={
-          'geo': _sample_geos(n_geos, integer_geos),
+          'geo': sample_geos(n_geos, integer_geos),
           'media_time': _sample_times(
               n_times=n_media_times, start_date=start_date
           ),
@@ -925,7 +1008,7 @@ def random_frequency_da(
       frequency,
       dims=['geo', 'media_time', channel_variable_name],
       coords={
-          'geo': _sample_geos(n_geos, integer_geos),
+          'geo': sample_geos(n_geos, integer_geos),
           'media_time': _sample_times(
               n_times=n_media_times, start_date=start_date
           ),
@@ -992,7 +1075,7 @@ def random_rf_spend_nd_da(
   coords = {}
   if n_geos is not None:
     dims.append('geo')
-    coords['geo'] = _sample_geos(n_geos, integer_geos)
+    coords['geo'] = sample_geos(n_geos, integer_geos)
   if n_times is not None:
     dims.append('time')
     coords['time'] = _sample_times(n_times=n_times)
@@ -1060,7 +1143,7 @@ def random_non_media_treatments_da(
       non_media_treatments,
       dims=['geo', 'time', 'non_media_channel'],
       coords={
-          'geo': _sample_geos(n_geos, integer_geos),
+          'geo': sample_geos(n_geos, integer_geos),
           'time': (
               _sample_times(n_times=n_times, date_format=date_format)
               if explicit_time_index is None
@@ -1484,17 +1567,52 @@ def sample_input_data_from_dataset(
     dataset: xr.Dataset, kpi_type: str
 ) -> input_data.InputData:
   """Generates a sample `InputData` from a full xarray Dataset."""
+  media = dataset.media if c.MEDIA in dataset.data_vars.keys() else None
+  media_spend = (
+      dataset.media_spend if c.MEDIA_SPEND in dataset.data_vars.keys() else None
+  )
+  reach = dataset.reach if c.REACH in dataset.data_vars.keys() else None
+  frequency = (
+      dataset.frequency if c.FREQUENCY in dataset.data_vars.keys() else None
+  )
+  rf_spend = (
+      dataset.rf_spend if c.RF_SPEND in dataset.data_vars.keys() else None
+  )
+  organic_media = (
+      dataset.organic_media
+      if c.ORGANIC_MEDIA in dataset.data_vars.keys()
+      else None
+  )
+  organic_reach = (
+      dataset.organic_reach
+      if c.ORGANIC_REACH in dataset.data_vars.keys()
+      else None
+  )
+  organic_frequency = (
+      dataset.organic_frequency
+      if c.ORGANIC_FREQUENCY in dataset.data_vars.keys()
+      else None
+  )
+  non_media_treatments = (
+      dataset.non_media_treatments
+      if c.NON_MEDIA_TREATMENTS in dataset.data_vars.keys()
+      else None
+  )
   return input_data.InputData(
       kpi=dataset.kpi,
       kpi_type=kpi_type,
       revenue_per_kpi=dataset.revenue_per_kpi,
       population=dataset.population,
       controls=dataset.controls,
-      media=dataset.media,
-      media_spend=dataset.media_spend,
-      reach=dataset.reach,
-      frequency=dataset.frequency,
-      rf_spend=dataset.rf_spend,
+      media=media,
+      media_spend=media_spend,
+      reach=reach,
+      frequency=frequency,
+      rf_spend=rf_spend,
+      organic_media=organic_media,
+      organic_reach=organic_reach,
+      organic_frequency=organic_frequency,
+      non_media_treatments=non_media_treatments,
   )
 
 

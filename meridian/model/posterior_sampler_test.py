@@ -61,7 +61,8 @@ class PosteriorMCMCSamplerTest(
             sigma=tfp.distributions.Deterministic(0),
             roi_m=tfp.distributions.Deterministic(0),
             roi_rf=tfp.distributions.Deterministic(0),
-        )
+        ),
+        media_effects_dist=constants.MEDIA_EFFECTS_NORMAL,
     )
     meridian = model.Meridian(
         input_data=self.short_input_data_with_media_and_rf,
@@ -79,9 +80,9 @@ class PosteriorMCMCSamplerTest(
 
   @parameterized.product(
       paid_media_prior_type=[
-          constants.PAID_MEDIA_PRIOR_TYPE_ROI,
-          constants.PAID_MEDIA_PRIOR_TYPE_MROI,
-          constants.PAID_MEDIA_PRIOR_TYPE_COEFFICIENT,
+          constants.TREATMENT_PRIOR_TYPE_ROI,
+          constants.TREATMENT_PRIOR_TYPE_MROI,
+          constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
       ],
       media_effects_dist=[
           constants.MEDIA_EFFECTS_NORMAL,
@@ -94,7 +95,8 @@ class PosteriorMCMCSamplerTest(
       media_effects_dist: str,
   ):
     model_spec = spec.ModelSpec(
-        paid_media_prior_type=paid_media_prior_type,
+        media_prior_type=paid_media_prior_type,
+        rf_prior_type=paid_media_prior_type,
         media_effects_dist=media_effects_dist,
     )
     meridian = model.Meridian(
@@ -140,10 +142,10 @@ class PosteriorMCMCSamplerTest(
         constants.SIGMA,
     ]
 
-    if paid_media_prior_type == constants.PAID_MEDIA_PRIOR_TYPE_ROI:
+    if paid_media_prior_type == constants.TREATMENT_PRIOR_TYPE_ROI:
       derived_params.append(constants.BETA_M)
       prior_distribution_params.append(constants.ROI_M)
-    elif paid_media_prior_type == constants.PAID_MEDIA_PRIOR_TYPE_MROI:
+    elif paid_media_prior_type == constants.TREATMENT_PRIOR_TYPE_MROI:
       derived_params.append(constants.BETA_M)
       prior_distribution_params.append(constants.MROI_M)
     else:
@@ -223,9 +225,9 @@ class PosteriorMCMCSamplerTest(
 
   @parameterized.product(
       paid_media_prior_type=[
-          constants.PAID_MEDIA_PRIOR_TYPE_ROI,
-          constants.PAID_MEDIA_PRIOR_TYPE_MROI,
-          constants.PAID_MEDIA_PRIOR_TYPE_COEFFICIENT,
+          constants.TREATMENT_PRIOR_TYPE_ROI,
+          constants.TREATMENT_PRIOR_TYPE_MROI,
+          constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
       ],
       media_effects_dist=[
           constants.MEDIA_EFFECTS_NORMAL,
@@ -238,7 +240,7 @@ class PosteriorMCMCSamplerTest(
       media_effects_dist: str,
   ):
     model_spec = spec.ModelSpec(
-        paid_media_prior_type=paid_media_prior_type,
+        rf_prior_type=paid_media_prior_type,
         media_effects_dist=media_effects_dist,
     )
     meridian = model.Meridian(
@@ -284,10 +286,10 @@ class PosteriorMCMCSamplerTest(
         constants.SIGMA,
     ]
 
-    if paid_media_prior_type == constants.PAID_MEDIA_PRIOR_TYPE_ROI:
+    if paid_media_prior_type == constants.TREATMENT_PRIOR_TYPE_ROI:
       derived_params.append(constants.BETA_RF)
       prior_distribution_params.append(constants.ROI_RF)
-    elif paid_media_prior_type == constants.PAID_MEDIA_PRIOR_TYPE_MROI:
+    elif paid_media_prior_type == constants.TREATMENT_PRIOR_TYPE_MROI:
       derived_params.append(constants.BETA_RF)
       prior_distribution_params.append(constants.MROI_RF)
     else:
@@ -369,9 +371,9 @@ class PosteriorMCMCSamplerTest(
   # TODO: Add test for holdout_id.
   @parameterized.product(
       paid_media_prior_type=[
-          constants.PAID_MEDIA_PRIOR_TYPE_ROI,
-          constants.PAID_MEDIA_PRIOR_TYPE_MROI,
-          constants.PAID_MEDIA_PRIOR_TYPE_COEFFICIENT,
+          constants.TREATMENT_PRIOR_TYPE_ROI,
+          constants.TREATMENT_PRIOR_TYPE_MROI,
+          constants.TREATMENT_PRIOR_TYPE_COEFFICIENT,
       ],
       media_effects_dist=[
           constants.MEDIA_EFFECTS_NORMAL,
@@ -384,7 +386,8 @@ class PosteriorMCMCSamplerTest(
       media_effects_dist: str,
   ):
     model_spec = spec.ModelSpec(
-        paid_media_prior_type=paid_media_prior_type,
+        media_prior_type=paid_media_prior_type,
+        rf_prior_type=paid_media_prior_type,
         media_effects_dist=media_effects_dist,
     )
     meridian = model.Meridian(
@@ -435,12 +438,12 @@ class PosteriorMCMCSamplerTest(
         constants.SIGMA,
     ]
 
-    if paid_media_prior_type in constants.PAID_MEDIA_PRIOR_TYPE_ROI:
+    if paid_media_prior_type in constants.TREATMENT_PRIOR_TYPE_ROI:
       derived_params.append(constants.BETA_M)
       derived_params.append(constants.BETA_RF)
       prior_distribution_params.append(constants.ROI_M)
       prior_distribution_params.append(constants.ROI_RF)
-    elif paid_media_prior_type == constants.PAID_MEDIA_PRIOR_TYPE_MROI:
+    elif paid_media_prior_type == constants.TREATMENT_PRIOR_TYPE_MROI:
       derived_params.append(constants.BETA_M)
       derived_params.append(constants.BETA_RF)
       prior_distribution_params.append(constants.MROI_M)
@@ -1384,6 +1387,135 @@ class PosteriorMCMCSamplerTest(
           model_spec=model_spec,
           inference_data=inference_data,
       )
+
+  @parameterized.named_parameters(
+      dict(testcase_name="seed_is_none", seed=None),
+      dict(testcase_name="seed_is_int", seed=42),
+      dict(testcase_name="seed_is_pair", seed=[42, 123]),
+  )
+  def test_sample_posterior_with_seed(self, seed):
+    if seed is not None:
+      seed = tfp.random.sanitize_seed(seed)
+    mock_sample_posterior = self.enter_context(
+        mock.patch.object(
+            posterior_sampler,
+            "_xla_windowed_adaptive_nuts",
+            autospec=True,
+            return_value=collections.namedtuple(
+                "StatesAndTrace", ["all_states", "trace"]
+            )(
+                all_states=self.test_posterior_states_media_and_rf,
+                trace=self.test_trace,
+            ),
+        )
+    )
+    model_spec = spec.ModelSpec()
+    meridian = model.Meridian(
+        input_data=self.short_input_data_with_media_and_rf,
+        model_spec=model_spec,
+    )
+    meridian.sample_posterior(
+        n_chains=self._N_CHAINS,
+        n_adapt=self._N_ADAPT,
+        n_burnin=self._N_BURNIN,
+        n_keep=self._N_KEEP,
+        seed=seed,
+    )
+    mock_sample_posterior.assert_called_with(
+        n_draws=self._N_BURNIN + self._N_KEEP,
+        joint_dist=mock.ANY,
+        n_chains=self._N_CHAINS,
+        num_adaptation_steps=self._N_ADAPT,
+        current_state=None,
+        init_step_size=None,
+        dual_averaging_kwargs=None,
+        max_tree_depth=10,
+        max_energy_diff=500.0,
+        unrolled_leapfrog_steps=1,
+        parallel_iterations=10,
+        seed=seed,
+    )
+
+  @parameterized.named_parameters(
+      dict(testcase_name="seed_is_invalid_sequence", seed=[1, 2, 3]),
+  )
+  def test_sample_posterior_with_invalid_seed_sequence(self, seed):
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        "Invalid seed: Must be either a single integer (stateful seed) or a"
+        " pair of two integers (stateless seed). See"
+        " [tfp.random.sanitize_seed](https://www.tensorflow.org/probability/api_docs/python/tfp/random/sanitize_seed)"
+        " for details.",
+    ):
+      model_spec = spec.ModelSpec()
+      meridian = model.Meridian(
+          input_data=self.short_input_data_with_media_and_rf,
+          model_spec=model_spec,
+      )
+      meridian.sample_posterior(
+          n_chains=self._N_CHAINS,
+          n_adapt=self._N_ADAPT,
+          n_burnin=self._N_BURNIN,
+          n_keep=self._N_KEEP,
+          seed=seed,
+      )
+
+  @parameterized.named_parameters(
+      dict(testcase_name="seed_is_none", initial_seed=None),
+      dict(
+          testcase_name="seed_is_int",
+          initial_seed=123,
+      ),
+      dict(
+          testcase_name="seed_is_pair",
+          initial_seed=[123, 456],
+      ),
+  )
+  def test_sample_posterior_seed_increment(self, initial_seed):
+    n_chains_list = [self._N_CHAINS, self._N_CHAINS]
+    mock_sample_posterior = self.enter_context(
+        mock.patch.object(
+            posterior_sampler,
+            "_xla_windowed_adaptive_nuts",
+            autospec=True,
+            return_value=collections.namedtuple(
+                "StatesAndTrace", ["all_states", "trace"]
+            )(
+                all_states=self.test_posterior_states_media_and_rf,
+                trace=self.test_trace,
+            ),
+        )
+    )
+    model_spec = spec.ModelSpec()
+    meridian = model.Meridian(
+        input_data=self.short_input_data_with_media_and_rf,
+        model_spec=model_spec,
+    )
+
+    meridian.sample_posterior(
+        n_chains=n_chains_list,
+        n_adapt=self._N_ADAPT,
+        n_burnin=self._N_BURNIN,
+        n_keep=self._N_KEEP,
+        seed=initial_seed,
+    )
+
+    calls = mock_sample_posterior.call_args_list
+    self.assertLen(calls, len(n_chains_list))
+
+    _, kwargs0 = calls[0]
+    _, kwargs1 = calls[1]
+
+    sanitized_seeds = []
+    if initial_seed is None:
+      sanitized_seeds.append(None)
+      sanitized_seeds.append(None)
+      self.assertIsNone(kwargs0["seed"])
+      self.assertIsNone(kwargs1["seed"])
+    else:
+      sanitized_seed0 = kwargs0["seed"]
+      sanitized_seed1 = kwargs1["seed"]
+      self.assertAllEqual(sanitized_seed1, [x + 1 for x in sanitized_seed0])
 
 
 if __name__ == "__main__":

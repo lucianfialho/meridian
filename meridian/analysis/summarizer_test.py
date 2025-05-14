@@ -20,6 +20,7 @@ from xml.etree import ElementTree as ET
 
 from absl.testing import absltest
 from absl.testing import parameterized
+import jinja2
 from meridian import constants as c
 from meridian.analysis import analyzer
 from meridian.analysis import summarizer
@@ -30,7 +31,6 @@ from meridian.data import test_utils as data_test_utils
 from meridian.data import time_coordinates as tc
 from meridian.model import model
 import xarray as xr
-
 
 _EARLIEST_DATE = dt.datetime(2022, 1, 1)
 _NUM_WEEKS = 80
@@ -114,6 +114,10 @@ class SummarizerTest(parameterized.TestCase):
     self._stub_plotters()
     self._stub_for_insights()
 
+    self.mock_template_env = mock.create_autospec(
+        jinja2.Environment, instance=True
+    )
+
   def tearDown(self):
     super().tearDown()
 
@@ -140,6 +144,12 @@ class SummarizerTest(parameterized.TestCase):
     self.reach_frequency.plot_optimal_frequency().to_json.return_value = '{}'
 
   def _stub_media_summary_plotters(self, media_summary):
+    media_summary.plot_channel_contribution_area_chart().to_json.return_value = (
+        '{}'
+    )
+    media_summary.plot_channel_contribution_bump_chart().to_json.return_value = (
+        '{}'
+    )
     media_summary.plot_contribution_waterfall_chart().to_json.return_value = (
         '{}'
     )
@@ -152,7 +162,9 @@ class SummarizerTest(parameterized.TestCase):
 
   def _stub_for_insights(self):
     self.media_metrics = test_utils.generate_paid_summary_metrics()
-    self.media_summary.paid_summary_metrics = self.media_metrics
+    self.media_summary.get_paid_summary_metrics = mock.MagicMock(
+        return_value=self.media_metrics
+    )
 
     frequency_data = test_utils.generate_optimal_frequency_data(
         channel_prefix='rf_ch', num_channels=2
@@ -274,7 +286,7 @@ class SummarizerTest(parameterized.TestCase):
     self.assertSequenceEqual(
         [chip.text.strip() for chip in chip_nodes if chip.text is not None],
         [
-            'Time period: Jan 1, 2022 - Jul 8, 2023',
+            'Time period: Jan 1, 2022 - Jul 15, 2023',
         ],
     )
 
@@ -289,8 +301,30 @@ class SummarizerTest(parameterized.TestCase):
     self.assertSequenceEqual(
         [chip.text.strip() for chip in chip_nodes if chip.text is not None],
         [
-            'Time period: Jan 1, 2022 - Jul 8, 2023',
+            'Time period: Jan 1, 2022 - Jul 15, 2023',
         ],
+    )
+
+  def test_output_chips_one_week(self):
+    start_date, end_date = dt.datetime(2022, 1, 1), dt.datetime(2022, 1, 1)
+
+    self.summarizer_revenue._meridian.expand_selected_time_dims.return_value = [
+        start_date.strftime(c.DATE_FORMAT)
+    ]
+
+    summary_html_dom = self._get_output_model_results_summary_html_dom(
+        summarizer_outcome=self.summarizer_revenue,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    chips_node = summary_html_dom.find('body/chips')
+    self.assertIsNotNone(chips_node)
+    chip_nodes = chips_node.findall('chip')
+
+    self.assertLen(chip_nodes, 1)
+    self.assertSequenceEqual(
+        [chip.text.strip() for chip in chip_nodes if chip.text is not None],
+        ['Time period: Jan 1, 2022 - Jan 8, 2022'],
     )
 
   def test_output_card_structure(self):
@@ -343,6 +377,18 @@ class SummarizerTest(parameterized.TestCase):
       (
           summary_text.CHANNEL_CONTRIB_CARD_ID,
           [
+              (
+                  summary_text.CHANNEL_CONTRIB_BY_TIME_CHART_ID,
+                  summary_text.CHANNEL_CONTRIB_BY_TIME_CHART_DESCRIPTION.format(
+                      outcome=c.REVENUE
+                  ),
+              ),
+              (
+                  summary_text.CHANNEL_CONTRIB_RANK_CHART_ID,
+                  summary_text.CHANNEL_CONTRIB_RANK_CHART_DESCRIPTION.format(
+                      outcome=c.REVENUE
+                  ),
+              ),
               (
                   summary_text.CHANNEL_DRIVERS_CHART_ID,
                   summary_text.CHANNEL_DRIVERS_CHART_DESCRIPTION.format(
@@ -747,23 +793,34 @@ class SummarizerTest(parameterized.TestCase):
   def test_channel_contrib_card_plotters_called(self):
     media_summary = self.media_summary
 
-    mock_spec_1 = 'revenue_waterfall'
+    mock_spec_area = 'revenue_area'
+    media_summary.plot_channel_contribution_area_chart().to_json.return_value = (
+        f'["{mock_spec_area}"]'
+    )
+    mock_spec_bump = 'revenue_bump'
+    media_summary.plot_channel_contribution_bump_chart().to_json.return_value = (
+        f'["{mock_spec_bump}"]'
+    )
+    mock_spec_waterfall = 'revenue_waterfall'
     media_summary.plot_contribution_waterfall_chart().to_json.return_value = (
-        f'["{mock_spec_1}"]'
+        f'["{mock_spec_waterfall}"]'
     )
-    mock_spec_2 = 'spend_contrib'
+    mock_spec_spend = 'spend_contrib'
     media_summary.plot_spend_vs_contribution().to_json.return_value = (
-        f'["{mock_spec_2}"]'
+        f'["{mock_spec_spend}"]'
     )
-    mock_spec_3 = 'revenue_contrib_pie'
+    mock_spec_pie = 'revenue_contrib_pie'
     media_summary.plot_contribution_pie_chart().to_json.return_value = (
-        f'["{mock_spec_3}"]'
+        f'["{mock_spec_pie}"]'
     )
 
     summary_html_dom = self._get_output_model_results_summary_html_dom(
         self.summarizer_revenue,
     )
+
     for mock_plot in [
+        media_summary.plot_channel_contribution_area_chart(),
+        media_summary.plot_channel_contribution_bump_chart(),
         media_summary.plot_contribution_waterfall_chart(),
         media_summary.plot_spend_vs_contribution(),
         media_summary.plot_contribution_pie_chart(),
@@ -781,17 +838,29 @@ class SummarizerTest(parameterized.TestCase):
         if script.text is not None
     ]
 
-    mock_spec_1_exists = any(
-        [mock_spec_1 in script_text for script_text in script_texts]
+    mock_spec_area_exists = any(
+        [mock_spec_area in script_text for script_text in script_texts]
     )
-    mock_spec_2_exists = any(
-        [mock_spec_2 in script_text for script_text in script_texts]
+    mock_spec_bump_exists = any(
+        [mock_spec_bump in script_text for script_text in script_texts]
     )
-    mock_spec_3_exists = any(
-        [mock_spec_3 in script_text for script_text in script_texts]
+    mock_spec_waterfall_exists = any(
+        [mock_spec_waterfall in script_text for script_text in script_texts]
+    )
+    mock_spec_spend_exists = any(
+        [mock_spec_spend in script_text for script_text in script_texts]
+    )
+    mock_spec_pie_exists = any(
+        [mock_spec_pie in script_text for script_text in script_texts]
     )
     self.assertTrue(
-        all([mock_spec_1_exists, mock_spec_2_exists, mock_spec_3_exists])
+        all([
+            mock_spec_area_exists,
+            mock_spec_bump_exists,
+            mock_spec_waterfall_exists,
+            mock_spec_spend_exists,
+            mock_spec_pie_exists,
+        ])
     )
 
   def test_channel_contrib_card_insights(self):
@@ -820,6 +889,74 @@ class SummarizerTest(parameterized.TestCase):
     ).text
 
     self.assertIn('Rf_Ch_1 and Ch_0 drove the most', insights_text)
+
+  @parameterized.named_parameters(
+      {
+          'testcase_name': 'weekly_short_range',
+          'num_time_points': c.QUARTERLY_SUMMARY_THRESHOLD_WEEKS - 1,
+          'use_n_times': False,
+          'expected_granularity': c.WEEKLY,
+      },
+      {
+          'testcase_name': 'quarterly_threshold_range',
+          'num_time_points': c.QUARTERLY_SUMMARY_THRESHOLD_WEEKS,
+          'use_n_times': False,
+          'expected_granularity': c.QUARTERLY,
+      },
+      {
+          'testcase_name': 'quarterly_long_range',
+          'num_time_points': c.QUARTERLY_SUMMARY_THRESHOLD_WEEKS + 50,
+          'use_n_times': False,
+          'expected_granularity': c.QUARTERLY,
+      },
+      {
+          'testcase_name': 'weekly_n_times_fallback',
+          'num_time_points': c.QUARTERLY_SUMMARY_THRESHOLD_WEEKS - 5,
+          'use_n_times': True,
+          'expected_granularity': c.WEEKLY,
+      },
+      {
+          'testcase_name': 'quarterly_n_times_fallback',
+          'num_time_points': c.QUARTERLY_SUMMARY_THRESHOLD_WEEKS + 10,
+          'use_n_times': True,
+          'expected_granularity': c.QUARTERLY,
+      },
+  )
+  def test_outcome_contrib_card_time_granularity_direct(
+      self,
+      num_time_points: int,
+      use_n_times: bool,
+      expected_granularity: str,
+  ):
+    self.media_summary_class.return_value = self.media_summary
+    media_summary = self.media_summary
+
+    media_summary.plot_channel_contribution_area_chart.reset_mock()
+    media_summary.plot_channel_contribution_bump_chart.reset_mock()
+
+    if use_n_times:
+      with mock.patch.object(
+          self.summarizer_revenue._meridian, 'n_times', num_time_points
+      ):
+        self.summarizer_revenue._create_outcome_contrib_card_html(
+            template_env=self.mock_template_env,
+            media_summary=media_summary,
+            selected_times=None,
+        )
+    else:
+      arg_selected_times = [f'time_{i}' for i in range(num_time_points)]
+      self.summarizer_revenue._create_outcome_contrib_card_html(
+          template_env=self.mock_template_env,
+          media_summary=media_summary,
+          selected_times=arg_selected_times,
+      )
+
+    media_summary.plot_channel_contribution_area_chart.assert_called_once_with(
+        time_granularity=expected_granularity
+    )
+    media_summary.plot_channel_contribution_bump_chart.assert_called_once_with(
+        time_granularity=expected_granularity
+    )
 
   def test_performance_breakdown_card_plotters_called(self):
     media_summary = self.media_summary
@@ -976,7 +1113,7 @@ class SummarizerTest(parameterized.TestCase):
     media_summary = self.media_summary
     reach_frequency = self.reach_frequency
 
-    media_summary.paid_summary_metrics.spend.data = [
+    media_summary.get_paid_summary_metrics().spend.data = [
         100,  # 'ch_0'
         200,  # 'ch_1'
         300,  # 'ch_2'

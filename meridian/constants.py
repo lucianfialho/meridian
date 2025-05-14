@@ -51,6 +51,8 @@ GREY_300 = '#DADCE0'
 
 # Example: "2024-01-09"
 DATE_FORMAT = '%Y-%m-%d'
+# Example: "2024 Apr"
+QUARTER_FORMAT = '%Y %b'
 
 # Input data variables.
 KPI = 'kpi'
@@ -95,6 +97,27 @@ POSSIBLE_INPUT_DATA_ARRAY_NAMES = (
     + MEDIA_INPUT_DATA_ARRAY_NAMES
     + RF_INPUT_DATA_ARRAY_NAMES
 )
+PAID_CHANNELS = (MEDIA, REACH, FREQUENCY)
+PAID_DATA = PAID_CHANNELS + (REVENUE_PER_KPI,)
+NON_PAID_DATA = (
+    ORGANIC_MEDIA,
+    ORGANIC_REACH,
+    ORGANIC_FREQUENCY,
+    NON_MEDIA_TREATMENTS,
+)
+SPEND_DATA = (
+    MEDIA_SPEND,
+    RF_SPEND,
+)
+PERFORMANCE_DATA = PAID_DATA + SPEND_DATA
+IMPRESSIONS_DATA = PAID_CHANNELS + NON_PAID_DATA
+RF_DATA = (
+    REACH,
+    FREQUENCY,
+    RF_SPEND,
+    REVENUE_PER_KPI,
+)
+NON_REVENUE_DATA = IMPRESSIONS_DATA + (CONTROLS,)
 
 # Scaled input data variables.
 MEDIA_SCALED = 'media_scaled'
@@ -171,17 +194,17 @@ RF_ROI_CALIBRATION_PERIOD = 'rf_roi_calibration_period'
 KNOTS = 'knots'
 BASELINE_GEO = 'baseline_geo'
 
-# Media prior types.
-PAID_MEDIA_PRIOR_TYPE_ROI = 'roi'
-PAID_MEDIA_PRIOR_TYPE_MROI = 'mroi'
-PAID_MEDIA_PRIOR_TYPE_COEFFICIENT = 'coefficient'
-PAID_MEDIA_PRIOR_TYPES = frozenset({
-    PAID_MEDIA_PRIOR_TYPE_ROI,
-    PAID_MEDIA_PRIOR_TYPE_MROI,
-    PAID_MEDIA_PRIOR_TYPE_COEFFICIENT,
+# Treatment prior types.
+TREATMENT_PRIOR_TYPE_ROI = 'roi'
+TREATMENT_PRIOR_TYPE_MROI = 'mroi'
+TREATMENT_PRIOR_TYPE_COEFFICIENT = 'coefficient'
+PAID_TREATMENT_PRIOR_TYPES = frozenset({
+    TREATMENT_PRIOR_TYPE_ROI,
+    TREATMENT_PRIOR_TYPE_MROI,
+    TREATMENT_PRIOR_TYPE_COEFFICIENT,
 })
 PAID_MEDIA_ROI_PRIOR_TYPES = frozenset(
-    {PAID_MEDIA_PRIOR_TYPE_ROI, PAID_MEDIA_PRIOR_TYPE_MROI}
+    {TREATMENT_PRIOR_TYPE_ROI, TREATMENT_PRIOR_TYPE_MROI}
 )
 # Represents a 1% increase in spend.
 MROI_FACTOR = 1.01
@@ -210,6 +233,11 @@ ROI_M = 'roi_m'
 ROI_RF = 'roi_rf'
 MROI_M = 'mroi_m'
 MROI_RF = 'mroi_rf'
+CONTRIBUTION_M = 'contribution_m'
+CONTRIBUTION_RF = 'contribution_rf'
+CONTRIBUTION_OM = 'contribution_om'
+CONTRIBUTION_ORF = 'contribution_orf'
+CONTRIBUTION_N = 'contribution_n'
 GAMMA_C = 'gamma_c'
 GAMMA_N = 'gamma_n'
 XI_C = 'xi_c'
@@ -337,10 +365,33 @@ UNSAVED_PARAMETERS = (
     GAMMA_GN_DEV,
     TAU_G_EXCL_BASELINE,  # Used to derive TAU_G.
 )
-IGNORED_PRIORS = immutabledict.immutabledict({
-    PAID_MEDIA_PRIOR_TYPE_ROI: (BETA_M, BETA_RF, MROI_M, MROI_RF),
-    PAID_MEDIA_PRIOR_TYPE_MROI: (BETA_M, BETA_RF, ROI_M, ROI_RF),
-    PAID_MEDIA_PRIOR_TYPE_COEFFICIENT: (ROI_M, ROI_RF, MROI_M, MROI_RF),
+IGNORED_PRIORS_MEDIA = immutabledict.immutabledict({
+    TREATMENT_PRIOR_TYPE_ROI: (
+        BETA_M,
+        MROI_M,
+    ),
+    TREATMENT_PRIOR_TYPE_MROI: (
+        BETA_M,
+        ROI_M,
+    ),
+    TREATMENT_PRIOR_TYPE_COEFFICIENT: (
+        ROI_M,
+        MROI_M,
+    ),
+})
+IGNORED_PRIORS_RF = immutabledict.immutabledict({
+    TREATMENT_PRIOR_TYPE_ROI: (
+        BETA_RF,
+        MROI_RF,
+    ),
+    TREATMENT_PRIOR_TYPE_MROI: (
+        BETA_RF,
+        ROI_RF,
+    ),
+    TREATMENT_PRIOR_TYPE_COEFFICIENT: (
+        ROI_RF,
+        MROI_RF,
+    ),
 })
 
 # Inference data dimensions.
@@ -543,6 +594,7 @@ TARGET_ROI = 'target_roi'
 TARGET_MROI = 'target_mroi'
 SPEND_CONSTRAINT_DEFAULT_FIXED_BUDGET = 0.3
 SPEND_CONSTRAINT_DEFAULT_FLEXIBLE_BUDGET = 1.0
+SPEND_CONSTRAINT_DEFAULT = 1.0
 
 
 # Plot constants.
@@ -588,3 +640,14 @@ END_DATE = 'end_date'
 CARD_INSIGHTS = 'insights'
 CARD_CHARTS = 'charts'
 CARD_STATS = 'stats'
+
+# VegaLite common params.
+VEGALITE_FACET_DEFAULT_WIDTH = 400
+VEGALITE_FACET_LARGE_WIDTH = 500
+VEGALITE_FACET_EXTRA_LARGE_WIDTH = 700
+
+# Time Granularity Constants
+WEEKLY = 'weekly'
+QUARTERLY = 'quarterly'
+TIME_GRANULARITIES = frozenset({WEEKLY, QUARTERLY})
+QUARTERLY_SUMMARY_THRESHOLD_WEEKS = 52

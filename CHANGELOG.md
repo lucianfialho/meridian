@@ -23,11 +23,99 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 ## [Unreleased]
 
+* Change `VEGALITE_FACET_EXTRA_LARGE_WIDTH` from 900 to 700.
+* Prevent negative media effect priors when using lognormal distribution upon
+  model init.
+* Add an optional `optimization_grid` arg to the optimizer.
+* Fix `incremental_outcome` to accept unscaled `non_media_treatments_baseline`.
+* Add spend allocation per geo and time if per-channel spend is provided.
+* Validate no time variation for non-media treatments, organic media, and
+  organic reach.
+* Add optimizer parameters `start_date` and `end_date` to replace
+  `selected_times`.
+
+## [1.0.9] - 2025-04-17
+
+* Add support for optimization with forecasted data.
+* Deprecate `get_historical_spend` for `get_aggregated_spend` with `new_data`
+  support.
+* Raise an error when `kpi_scaled` is all zero and `paid_media_prior_type` is
+  anything other than "coefficient".
+* Prevent negative media effect priors when using lognormal distribution.
+* Add support for weekly time granularity to the contribution area and bump
+  charts.
+* Update channel contribution over time charts in Summarizer to toggle weekly vs
+  quarterly granularity based on the selected time period length.
+* Adjust the optimization summary to display dates in the same format as
+  "Marketing Mix Modeling Report".
+* Increase width of model fit and channel contribution over time charts in the
+  Visualizer.
+
+## [1.0.8] - 2025-04-08
+
+* Update contribution calculation methods in `MediaSummary` with
+  `aggregate_times` parameter to support granular time.
+* Add a `new_data` argument to `analyzer.optimal_freq()`.
+* Refactor args in `create_optimization_grid` to be consistent with
+  `optimize(...)`.
+* Fix response curves for KPI-based optimization.
+* Add `plot_channel_contribution_area_chart` method to `MediaSummary` in the
+  visualizer.
+* Add `plot_channel_contribution_bump_chart` method to `MediaSummary` in the
+  visualizer.
+* Add organic media support for adstock decay in analyzer.
+* Add channel contribution area chart and channel contribution bump chart to
+  model results summary report in the summarizer.
+* Add an extra check for zeros or negative values in `revenue_per_kpi`.
+* Add per-channel constraints parameters to `OptimizationGrid.optimize(...)`.
+* Add organic media support for hill curves in analyzer.
+* Add organic media support for `plot_hill_curves` in visualizer.
+
+## [1.0.7] - 2025-03-19
+
+* Bump tensorflow to 2.18.
+* Bump tensorflow-probability to 0.25.
+* Bump numpy to 2.0.2.
+* Bump pandas to 2.2.2.
+* Bump scipy to 1.13.1.
+
+## [1.0.6] - 2025-03-18
+
+* Fix issue #548: Make time coordinate regularity check less stringent.
+* Force `DataTensors` to have all tensors with `dtype=tf.float32`.
+* Refactor new data validation and data filling into the `DataTensors` class.
+* Fix bug in marginal ROI calculation in `summary_metrics` when new spend data
+  is passed in.
+* Add `by_reach` param to `incremental_outcome()` to allow scaling `reach` or
+  `frequency`.
+* Refactor `marginal_roi()` and the mROI calculation in `summary_metrics` to use
+  the scaling factors in `incremental_outcome()`, removing duplicate code.
+* Allow `new_data` to have any number of time dimensions for `roi()`,
+  `marginal_roi()`, `cpik()`, and `summary_metrics()`. This allows the use of
+  forecasted data for analysis.
+* Add `optimize()` method to the `OptimizationGrid` dataclass.
+* Add a warning when the target constraint of flexible budget optimization is
+  not met.
+
+## [1.0.5] - 2025-03-06
+
+* Add technical support for python 3.10.
+* Align `NaNs` in `spend_grid` and `incremental_outcome_grid` in the optimizer.
+* Fix the stopping criteria of target total ROI in flexible budget optimization.
+* Separate creation of the grid data and the optimization.
+
+## [1.0.4] - 2025-02-28
+
+* Fix validation on injected inference data when `unique_sigma_for_each_geo` is
+  used in the model initialization.
 * Fix a divide-by-zero error in spend ratio calculation when historical spend is
   zero, preventing a `ValueError` in `output_optimization_summary`.
 * Add `non_media_baseline_values` argument to `MediaSummary` visualizations.
 * Refactor prior and posterior sampling logic into separate modules, simplifying
   `model` module.
+* Create a helper argument builder construct for API parameters that require
+  an ordered list/array of values.
+  See, e.g., `InputData.get_paid_channels_argument_builder()`.
 
 ## [1.0.3] - 2025-02-07
 
@@ -200,4 +288,10 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 [1.0.1]: https://github.com/google/meridian/releases/tag/v1.0.1
 [1.0.2]: https://github.com/google/meridian/releases/tag/v1.0.2
 [1.0.3]: https://github.com/google/meridian/releases/tag/v1.0.3
-[Unreleased]: https://github.com/google/meridian/compare/v1.0.3...HEAD
+[1.0.4]: https://github.com/google/meridian/releases/tag/v1.0.4
+[1.0.5]: https://github.com/google/meridian/releases/tag/v1.0.5
+[1.0.6]: https://github.com/google/meridian/releases/tag/v1.0.6
+[1.0.7]: https://github.com/google/meridian/releases/tag/v1.0.7
+[1.0.8]: https://github.com/google/meridian/releases/tag/v1.0.8
+[1.0.9]: https://github.com/google/meridian/releases/tag/v1.0.9
+[Unreleased]: https://github.com/google/meridian/compare/v1.0.9...HEAD

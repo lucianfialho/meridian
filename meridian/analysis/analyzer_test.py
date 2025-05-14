@@ -203,53 +203,51 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
       self.assertLen(w, 1)
       self.assertTrue(issubclass(w[0].category, UserWarning))
       self.assertIn(
-          "A `revenue_per_kpi` value was passed in the `new_data` argument to"
-          " the `expected_outcome()` method. This is currently not supported"
-          " and will be ignored.",
+          "A `revenue_per_kpi` value was passed in the `new_data` argument. "
+          "This is not supported and will be ignored.",
           str(w[0].message),
       )
 
-  def test_expected_outcome_wrong_controls_raises_exception(self):
+  def test_expected_outcome_wrong_new_data_dims_raises_exception(self):
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        "New `controls` must have 3 dimension(s). Found 2 dimension(s).",
+    ):
+      self.analyzer_media_and_rf.expected_outcome(
+          new_data=analyzer.DataTensors(controls=tf.ones((_N_GEOS, _N_TIMES))),
+      )
+
+  def test_expected_outcome_wrong_new_data_geos_raises_exception(self):
     with self.assertRaisesRegex(
         ValueError,
-        "new_controls.shape must match controls.shape",
+        "New `media` is expected to have 5 geos. Found 6 geos.",
     ):
       self.analyzer_media_and_rf.expected_outcome(
           new_data=analyzer.DataTensors(
-              controls=self.meridian_media_and_rf.population
+              media=tf.ones((6, _N_MEDIA_TIMES, _N_MEDIA_CHANNELS))
           ),
       )
 
-  def test_expected_outcome_wrong_media_raises_exception(self):
+  def test_expected_outcome_wrong_new_data_times_raises_exception(self):
     with self.assertRaisesRegex(
         ValueError,
-        "new_media.shape must match media.shape",
+        "New `media` is expected to have 52 time periods. Found 10 time"
+        " periods.",
     ):
       self.analyzer_media_and_rf.expected_outcome(
           new_data=analyzer.DataTensors(
-              media=self.meridian_media_and_rf.population
+              media=tf.ones((_N_GEOS, 10, _N_MEDIA_CHANNELS))
           ),
       )
 
-  def test_expected_outcome_wrong_reach_raises_exception(self):
+  def test_expected_outcome_wrong_new_data_channels_raises_exception(self):
     with self.assertRaisesRegex(
         ValueError,
-        "new_reach.shape must match reach.shape",
+        "New `frequency` is expected to have 2 channels. Found 3 channels.",
     ):
       self.analyzer_media_and_rf.expected_outcome(
           new_data=analyzer.DataTensors(
-              reach=self.meridian_media_and_rf.population
-          ),
-      )
-
-  def test_expected_outcome_wrong_frequency_raises_exception(self):
-    with self.assertRaisesRegex(
-        ValueError,
-        "new_frequency.shape must match frequency.shape",
-    ):
-      self.analyzer_media_and_rf.expected_outcome(
-          new_data=analyzer.DataTensors(
-              frequency=self.meridian_media_and_rf.population
+              frequency=tf.ones((_N_GEOS, _N_TIMES, 3))
           ),
       )
 
@@ -308,31 +306,30 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
       self.assertLen(w, 1)
       self.assertTrue(issubclass(w[0].category, UserWarning))
       self.assertIn(
-          "A `controls` value was passed in the `new_data` argument to the"
-          " `incremental_outcome()` method. This has no effect on the output"
-          " and will be ignored.",
+          "A `controls` value was passed in the `new_data` argument. This is"
+          " not supported and will be ignored.",
           str(w[0].message),
       )
 
   @parameterized.named_parameters(
       (
           "wrong_media_dims",
-          analyzer.DataTensors(media=tf.ones((5, 1))),
+          {"media": tf.ones((5, 1))},
           "New `media` must have 3 dimension(s). Found 2 dimension(s).",
       ),
       (
           "wrong_reach_dims",
-          analyzer.DataTensors(reach=tf.ones((5, 1))),
+          {"reach": tf.ones((5, 1))},
           "New `reach` must have 3 dimension(s). Found 2 dimension(s).",
       ),
       (
           "wrong_frequency_dims",
-          analyzer.DataTensors(frequency=tf.ones((5, 1))),
+          {"frequency": tf.ones((5, 1))},
           "New `frequency` must have 3 dimension(s). Found 2 dimension(s).",
       ),
       (
           "wrong_revenue_per_kpi_dims",
-          analyzer.DataTensors(revenue_per_kpi=tf.ones((5))),
+          {"revenue_per_kpi": tf.ones((5))},
           (
               "New `revenue_per_kpi` must have 2 dimension(s). Found 1"
               " dimension(s)."
@@ -345,7 +342,9 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
       expected_error_message: str,
   ):
     with self.assertRaisesWithLiteralMatch(ValueError, expected_error_message):
-      self.analyzer_media_and_rf.incremental_outcome(new_data=new_param)
+      self.analyzer_media_and_rf.incremental_outcome(
+          new_data=analyzer.DataTensors(**new_param)
+      )
 
   @parameterized.named_parameters(
       ("missing_media", "media"),
@@ -471,8 +470,8 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
         ValueError,
         "If the time dimension of any variable in `new_data` is modified, then"
         " all variables must be provided with the same number of time periods."
-        " `new_data.revenue_per_kpi` has 8 time periods and does not match"
-        " `new_data.media` which has 10 time periods.",
+        " `revenue_per_kpi` has 8 time periods, which does not match the"
+        " modified number of time periods, 10.",
     ):
       self.analyzer_media_and_rf.incremental_outcome(
           new_data=analyzer.DataTensors(
@@ -687,6 +686,28 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
         atol=1e-3,
     )
 
+  def test_incremental_outcome_media_and_rf_new_params_correct_shape(self):
+    model.Meridian.inference_data = mock.PropertyMock(
+        return_value=self.inference_data_media_and_rf
+    )
+    outcome = self.analyzer_media_and_rf.incremental_outcome(
+        new_data=analyzer.DataTensors(
+            media=self.meridian_media_and_rf.media_tensors.media[..., -15:, :],
+            reach=self.meridian_media_and_rf.rf_tensors.reach[..., -15:, :],
+            frequency=self.meridian_media_and_rf.rf_tensors.frequency[
+                ..., -15:, :
+            ],
+            revenue_per_kpi=self.meridian_media_and_rf.revenue_per_kpi[
+                ..., -15:
+            ],
+        ),
+        aggregate_times=False,
+    )
+    self.assertEqual(
+        outcome.shape,
+        (_N_CHAINS, _N_KEEP, 15, _N_MEDIA_CHANNELS + _N_RF_CHANNELS),
+    )
+
   @parameterized.product(
       use_posterior=[False, True],
       aggregate_geos=[False, True],
@@ -767,60 +788,86 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
         atol=1e-3,
     )
 
-  def test_roi_wrong_media_raises_exception(self):
-    with self.assertRaisesRegex(
-        ValueError,
-        "new_data.media.shape must match media.shape",
-    ):
-      self.analyzer_media_and_rf.roi(
-          new_data=analyzer.DataTensors(
-              media=self.meridian_media_and_rf.population
-          ),
-      )
+  def test_marginal_roi_new_times_data_correct(self):
+    model.Meridian.inference_data = mock.PropertyMock(
+        return_value=self.inference_data_media_and_rf
+    )
+    max_lag = 15
+    n_new_times = 15
+    total_times = max_lag + n_new_times
+    actual = self.analyzer_media_and_rf.marginal_roi(
+        new_data=analyzer.DataTensors(
+            media=self.meridian_media_and_rf.media_tensors.media[
+                ..., -total_times:, :
+            ],
+            media_spend=self.meridian_media_and_rf.media_tensors.media_spend[
+                ..., -total_times:, :
+            ],
+            reach=self.meridian_media_and_rf.rf_tensors.reach[
+                ..., -total_times:, :
+            ],
+            frequency=self.meridian_media_and_rf.rf_tensors.frequency[
+                ..., -total_times:, :
+            ],
+            rf_spend=self.meridian_media_and_rf.rf_tensors.rf_spend[
+                ..., -total_times:, :
+            ],
+            revenue_per_kpi=self.meridian_media_and_rf.revenue_per_kpi[
+                ..., -total_times:
+            ],
+        ),
+        selected_times=[False] * max_lag + [True] * n_new_times,
+    )
+    expected = self.analyzer_media_and_rf.marginal_roi(
+        selected_times=list(self.input_data_media_and_rf.time.values)[
+            -n_new_times:
+        ]
+    )
+    self.assertAllClose(actual, expected, rtol=1e-3, atol=1e-3)
 
-  def test_roi_wrong_media_spend_raises_exception(self):
+  def test_roi_wrong_new_data_dims_raises_exception(self):
     with self.assertRaisesWithLiteralMatch(
         ValueError,
-        "new_data.media_spend.shape: (5,) must match either (3,) or (5,"
-        " 49, 3).",
+        "New `media_spend` must have 1 or 3 dimensions. Found 2 dimensions.",
     ):
       self.analyzer_media_and_rf.roi(
           new_data=analyzer.DataTensors(
-              media_spend=self.meridian_media_and_rf.population
+              media_spend=tf.ones((_N_GEOS, _N_TIMES))
           ),
       )
 
-  def test_roi_wrong_reach_raises_exception(self):
+  def test_roi_wrong_new_data_geos_raises_exception(self):
     with self.assertRaisesRegex(
         ValueError,
-        "new_data.reach.shape must match reach.shape",
+        "New `media_spend` is expected to have 5 geos. Found 6 geos.",
     ):
       self.analyzer_media_and_rf.roi(
           new_data=analyzer.DataTensors(
-              reach=self.meridian_media_and_rf.population
+              media_spend=tf.ones((6, _N_MEDIA_TIMES, _N_MEDIA_CHANNELS))
           ),
       )
 
-  def test_roi_wrong_frequency_raises_exception(self):
-    with self.assertRaisesRegex(
-        ValueError,
-        "new_data.frequency.shape must match frequency.shape",
-    ):
-      self.analyzer_media_and_rf.roi(
-          new_data=analyzer.DataTensors(
-              frequency=self.meridian_media_and_rf.population
-          ),
-      )
-
-  def test_roi_wrong_rf_spend_raises_exception(self):
+  def test_roi_wrong_new_data_times_raises_exception(self):
     with self.assertRaisesWithLiteralMatch(
         ValueError,
-        "new_data.rf_spend.shape: (5,) must match either (2,) or (5, 49, 2).",
+        "If the time dimension of a variable in `new_data` is modified, then"
+        " all variables must be provided in `new_data`. The following variables"
+        " are missing: `['media', 'reach', 'frequency', 'revenue_per_kpi',"
+        " 'media_spend']`.",
     ):
       self.analyzer_media_and_rf.roi(
           new_data=analyzer.DataTensors(
-              rf_spend=self.meridian_media_and_rf.population
+              rf_spend=tf.ones((_N_GEOS, 10, _N_RF_CHANNELS))
           ),
+      )
+
+  def test_roi_wrong_new_data_channels_raises_exception(self):
+    with self.assertRaisesRegex(
+        ValueError,
+        "New `reach` is expected to have 2 channels. Found 3 channels.",
+    ):
+      self.analyzer_media_and_rf.roi(
+          new_data=analyzer.DataTensors(reach=tf.ones((_N_GEOS, _N_TIMES, 3))),
       )
 
   @parameterized.product(
@@ -862,6 +909,43 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
     )
     self.assertAllClose(expected_roi, roi)
 
+  def test_roi_media_and_rf_new_params_correct(self):
+    model.Meridian.inference_data = mock.PropertyMock(
+        return_value=self.inference_data_media_and_rf
+    )
+    max_lag = 15
+    n_new_times = 15
+    total_times = max_lag + n_new_times
+    actual = self.analyzer_media_and_rf.roi(
+        new_data=analyzer.DataTensors(
+            media=self.meridian_media_and_rf.media_tensors.media[
+                ..., -total_times:, :
+            ],
+            media_spend=self.meridian_media_and_rf.media_tensors.media_spend[
+                ..., -total_times:, :
+            ],
+            reach=self.meridian_media_and_rf.rf_tensors.reach[
+                ..., -total_times:, :
+            ],
+            frequency=self.meridian_media_and_rf.rf_tensors.frequency[
+                ..., -total_times:, :
+            ],
+            rf_spend=self.meridian_media_and_rf.rf_tensors.rf_spend[
+                ..., -total_times:, :
+            ],
+            revenue_per_kpi=self.meridian_media_and_rf.revenue_per_kpi[
+                ..., -total_times:
+            ],
+        ),
+        selected_times=[False] * max_lag + [True] * n_new_times,
+    )
+    expected = self.analyzer_media_and_rf.roi(
+        selected_times=list(self.input_data_media_and_rf.time.values)[
+            -n_new_times:
+        ]
+    )
+    self.assertAllClose(actual, expected)
+
   @parameterized.product(
       use_posterior=[False, True],
       aggregate_geos=[False, True],
@@ -901,6 +985,43 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
         / self.analyzer_media_and_rf.incremental_outcome(use_kpi=True)
     )
     self.assertAllClose(expected_cpik, cpik)
+
+  def test_cpik_new_times_data_correct(self):
+    model.Meridian.inference_data = mock.PropertyMock(
+        return_value=self.inference_data_media_and_rf
+    )
+    max_lag = 15
+    n_new_times = 15
+    total_times = max_lag + n_new_times
+    actual = self.analyzer_media_and_rf.cpik(
+        new_data=analyzer.DataTensors(
+            media=self.meridian_media_and_rf.media_tensors.media[
+                ..., -total_times:, :
+            ],
+            media_spend=self.meridian_media_and_rf.media_tensors.media_spend[
+                ..., -total_times:, :
+            ],
+            reach=self.meridian_media_and_rf.rf_tensors.reach[
+                ..., -total_times:, :
+            ],
+            frequency=self.meridian_media_and_rf.rf_tensors.frequency[
+                ..., -total_times:, :
+            ],
+            rf_spend=self.meridian_media_and_rf.rf_tensors.rf_spend[
+                ..., -total_times:, :
+            ],
+            revenue_per_kpi=self.meridian_media_and_rf.revenue_per_kpi[
+                ..., -total_times:
+            ],
+        ),
+        selected_times=[False] * max_lag + [True] * n_new_times,
+    )
+    expected = self.analyzer_media_and_rf.cpik(
+        selected_times=list(self.input_data_media_and_rf.time.values)[
+            -n_new_times:
+        ]
+    )
+    self.assertAllClose(actual, expected)
 
   def test_hill_histogram_column_names(self):
     hill_histogram_table = (
@@ -992,6 +1113,27 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
         list(hill_table[constants.END_INTERVAL_HISTOGRAM])[-5:],
         np.array(test_utils.HILL_CURVES_END_INTERVAL_HISTOGRAM),
         atol=1e-5,
+    )
+
+  @mock.patch("meridian.analysis.analyzer.np.histogram")
+  def test_hill_curves_scaled_histogram_avoids_nan_on_zero_counts(
+      self, mock_np_histogram
+  ):
+    n_bins = 10
+    mock_counts = np.zeros(n_bins)
+    mock_buckets = np.linspace(0, 1, n_bins + 1)
+    mock_np_histogram.return_value = (mock_counts, mock_buckets)
+
+    hill_curves_df = self.analyzer_media_and_rf.hill_curves(n_bins=n_bins)
+    histogram_part = hill_curves_df[
+        (hill_curves_df[constants.CHANNEL_TYPE] == constants.MEDIA)
+        & (hill_curves_df[constants.COUNT_HISTOGRAM].notna())
+    ].copy()
+
+    has_nan = histogram_part[constants.SCALED_COUNT_HISTOGRAM].isna().any()
+    self.assertFalse(
+        has_nan,
+        "NaN found in scaled_count_histogram.",
     )
 
   def test_media_summary_returns_correct_values(self):
@@ -1289,6 +1431,75 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
       self.assertNotIn(constants.MROI, media_summary.data_vars)
       self.assertNotIn(constants.CPIK, media_summary.data_vars)
 
+  def test_summary_metrics_new_times_data_returns_correct_variables(self):
+    summary_metrics = self.analyzer_media_and_rf.summary_metrics(
+        new_data=analyzer.DataTensors(
+            media=self.meridian_media_and_rf.media_tensors.media[..., -15:, :],
+            media_spend=self.meridian_media_and_rf.media_tensors.media_spend[
+                ..., -15:, :
+            ],
+            reach=self.meridian_media_and_rf.rf_tensors.reach[..., -15:, :],
+            frequency=self.meridian_media_and_rf.rf_tensors.frequency[
+                ..., -15:, :
+            ],
+            rf_spend=self.meridian_media_and_rf.rf_tensors.rf_spend[
+                ..., -15:, :
+            ],
+            revenue_per_kpi=self.meridian_media_and_rf.revenue_per_kpi[
+                ..., -15:
+            ],
+        )
+    )
+    self.assertEqual(
+        list(summary_metrics.data_vars.keys()),
+        [
+            constants.IMPRESSIONS,
+            constants.PCT_OF_IMPRESSIONS,
+            constants.SPEND,
+            constants.PCT_OF_SPEND,
+            constants.CPM,
+            constants.INCREMENTAL_OUTCOME,
+            constants.ROI,
+            constants.EFFECTIVENESS,
+            constants.MROI,
+            constants.CPIK,
+        ],
+    )
+
+  def test_summary_metrics_new_times_data_aggregate_times_false(self):
+    summary_metrics = self.analyzer_media_and_rf.summary_metrics(
+        new_data=analyzer.DataTensors(
+            media=self.meridian_media_and_rf.media_tensors.media[..., -5:, :],
+            media_spend=self.meridian_media_and_rf.media_tensors.media_spend[
+                ..., -5:, :
+            ],
+            reach=self.meridian_media_and_rf.rf_tensors.reach[..., -5:, :],
+            frequency=self.meridian_media_and_rf.rf_tensors.frequency[
+                ..., -5:, :
+            ],
+            rf_spend=self.meridian_media_and_rf.rf_tensors.rf_spend[
+                ..., -5:, :
+            ],
+            revenue_per_kpi=self.meridian_media_and_rf.revenue_per_kpi[
+                ..., -5:
+            ],
+        ),
+        selected_times=[False, False, True, True, False],
+        aggregate_times=False,
+    )
+    self.assertEqual(list(summary_metrics.time), [2, 3])
+    self.assertEqual(
+        list(summary_metrics.data_vars.keys()),
+        [
+            "impressions",
+            "pct_of_impressions",
+            "spend",
+            "pct_of_spend",
+            "cpm",
+            "incremental_outcome",
+        ],
+    )
+
   @parameterized.product(
       aggregate_geos=[False, True],
       aggregate_times=[False, True],
@@ -1337,20 +1548,14 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
     )
     expected = xr.Dataset(
         coords={
-            constants.FREQUENCY: ([constants.FREQUENCY], [1.0, 2.0, 3.0]),
-            constants.RF_CHANNEL: (
-                [constants.RF_CHANNEL],
-                ["rf_ch_0", "rf_ch_1"],
-            ),
-            constants.METRIC: (
-                [constants.METRIC],
-                [
-                    constants.MEAN,
-                    constants.MEDIAN,
-                    constants.CI_LO,
-                    constants.CI_HI,
-                ],
-            ),
+            constants.FREQUENCY: [1.0, 2.0, 3.0],
+            constants.RF_CHANNEL: ["rf_ch_0", "rf_ch_1"],
+            constants.METRIC: [
+                constants.MEAN,
+                constants.MEDIAN,
+                constants.CI_LO,
+                constants.CI_HI,
+            ],
         },
         data_vars={
             constants.ROI: (
@@ -1381,15 +1586,8 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
             constants.OPTIMIZED_EFFECTIVENESS: (
                 [constants.RF_CHANNEL, constants.METRIC],
                 [
-                    [0.001699, 0.001705, 0.000595, 0.002795],
-                    [0.00259, 0.002557, 0.000663, 0.004585],
-                ],
-            ),
-            constants.OPTIMIZED_PCT_OF_CONTRIBUTION: (
-                [constants.RF_CHANNEL, constants.METRIC],
-                [
-                    [5.16181, 5.18164, 1.80875, 8.49197],
-                    [7.89052, 7.79130, 2.01976, 13.96686],
+                    [0.00038, 0.000382, 0.000133, 0.000626],
+                    [0.000544, 0.000537, 0.000139, 0.000963],
                 ],
             ),
             constants.OPTIMIZED_ROI: (
@@ -1406,7 +1604,7 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
             ),
             constants.OPTIMIZED_CPIK: (
                 [constants.RF_CHANNEL, constants.METRIC],
-                [[0.371, 0.371, 0.132, 0.623], [0.337, 0.337, 0.085, 0.591]],
+                [[1.16, 1.13, 0.417, 1.95], [1.06, 1.05, 0.268, 1.85]],
             ),
         },
         attrs={
@@ -1434,11 +1632,6 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
         atol=0.00001,
     )
     xr.testing.assert_allclose(
-        actual.optimized_pct_of_contribution,
-        expected.optimized_pct_of_contribution,
-        atol=0.01,
-    )
-    xr.testing.assert_allclose(
         actual.optimized_roi,
         expected.optimized_roi,
         atol=0.01,
@@ -1460,6 +1653,36 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
     )
     self.assertEqual(actual.confidence_level, expected.confidence_level)
     self.assertEqual(actual.use_posterior, expected.use_posterior)
+
+  def test_optimal_freq_new_times_data_correct(self):
+    max_lag = 15
+    n_new_times = 15
+    total_times = max_lag + n_new_times
+    actual = self.analyzer_media_and_rf.optimal_freq(
+        new_data=analyzer.DataTensors(
+            reach=self.meridian_media_and_rf.rf_tensors.reach[
+                ..., -total_times:, :
+            ],
+            frequency=self.meridian_media_and_rf.rf_tensors.frequency[
+                ..., -total_times:, :
+            ],
+            rf_spend=self.meridian_media_and_rf.rf_tensors.rf_spend[
+                ..., -total_times:, :
+            ],
+            revenue_per_kpi=self.meridian_media_and_rf.revenue_per_kpi[
+                ..., -total_times:
+            ],
+        ),
+        freq_grid=[1.0, 2.0, 3.0],
+        selected_times=[False] * max_lag + [True] * n_new_times,
+    )
+    expected = self.analyzer_media_and_rf.optimal_freq(
+        selected_times=list(self.input_data_media_and_rf.time.values)[
+            -n_new_times:
+        ],
+        freq_grid=[1.0, 2.0, 3.0],
+    )
+    xr.testing.assert_allclose(actual, expected)
 
   def test_rhat_media_and_rf_correct(self):
     rhat = self.analyzer_media_and_rf.get_rhat()
@@ -2040,10 +2263,40 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
           int(list(is_true_df[constants.TIME_UNITS])[i]),
       )
 
-  def test_get_historical_spend_correct_channel_names(self):
-    actual_hist_spend = self.analyzer_media_and_rf.get_historical_spend(
-        selected_times=None
-    )
+  def test_adstock_decay_index_is_standard_range_index(self):
+    analyzer_ = self.analyzer_media_and_rf
+    adstock_df = analyzer_.adstock_decay()
+
+    self.assertNotEmpty(adstock_df)
+    self.assertEqual(adstock_df.index.start, 0)
+    self.assertEqual(adstock_df.index.step, 1)
+    self.assertLen(adstock_df, adstock_df.index.stop)
+
+  def test_get_historical_spend_deprecated_warning(self):
+    with self.assertWarnsRegex(
+        DeprecationWarning,
+        "`get_historical_spend` is deprecated. Please use"
+        " `get_aggregated_spend` with `new_data=None` instead.",
+    ):
+      self.analyzer_media_and_rf.get_historical_spend(
+          selected_times=None, include_media=True, include_rf=True
+      )
+
+  def test_get_historical_spend_calls_get_aggregated_spend(self):
+    with mock.patch.object(
+        self.analyzer_media_and_rf,
+        "get_aggregated_spend",
+        autospec=True,
+    ) as mock_get_aggregated_spend:
+      self.analyzer_media_and_rf.get_historical_spend(
+          selected_times=None, include_media=True, include_rf=True
+      )
+      mock_get_aggregated_spend.assert_called_once_with(
+          selected_times=None, include_media=True, include_rf=True
+      )
+
+  def test_get_aggregated_spend_correct_channel_names(self):
+    actual_hist_spend = self.analyzer_media_and_rf.get_aggregated_spend()
     expected_channel_names = (
         self.input_data_media_and_rf.get_all_paid_channels()
     )
@@ -2052,7 +2305,7 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
         expected_channel_names, actual_hist_spend.channel.data
     )
 
-  def test_get_historical_spend_correct_values(self):
+  def test_get_aggregated_spend_correct_values(self):
     # Set it to None to avoid the dimension checks on inference data.
     self.enter_context(
         mock.patch.object(
@@ -2098,12 +2351,64 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
     meridian_analyzer = analyzer.Analyzer(meridian)
 
     # All times are selected.
-    selected_times = None
-    actual_hist_spend = meridian_analyzer.get_historical_spend(selected_times)
+    actual_hist_spend = meridian_analyzer.get_aggregated_spend()
     expected_all_spend = np.array([3.3, 6.3, 9.3])
     self.assertAllClose(expected_all_spend, actual_hist_spend.data)
 
-  def test_get_historical_spend_selected_times_correct_values(self):
+  def test_get_aggregated_spend_new_data_correct_values(self):
+    # Set it to None to avoid the dimension checks on inference data.
+    self.enter_context(
+        mock.patch.object(
+            model.Meridian,
+            "inference_data",
+            new=property(lambda unused_self: None),
+        )
+    )
+
+    data = data_test_utils.sample_input_data_non_revenue_revenue_per_kpi(
+        n_geos=1,
+        n_times=3,
+        n_media_times=4,
+        n_media_channels=2,
+        n_rf_channels=1,
+        seed=0,
+    )
+
+    # Avoid the pytype check complaint.
+    assert data.media_channel is not None and data.rf_channel is not None
+
+    data.media_spend = xr.DataArray(
+        np.array([[[1.0, 2.0], [1.1, 2.1], [1.2, 2.2]]]),
+        dims=["geo", "time", "media_channel"],
+        coords={
+            "geo": data.geo.values,
+            "time": data.time.values,
+            "media_channel": data.media_channel.values,
+        },
+    )
+    data.rf_spend = xr.DataArray(
+        np.array([[[3.0], [3.1], [3.2]]]),
+        dims=["geo", "time", "rf_channel"],
+        coords={
+            "geo": data.geo.values,
+            "time": data.time.values,
+            "rf_channel": data.rf_channel.values,
+        },
+    )
+
+    model_spec = spec.ModelSpec()
+    meridian = model.Meridian(input_data=data, model_spec=model_spec)
+    meridian_analyzer = analyzer.Analyzer(meridian)
+
+    # All times are selected.
+    new_media_spend = tf.convert_to_tensor([[[1, 2], [2, 3], [3, 4]]])
+    actual_hist_spend = meridian_analyzer.get_aggregated_spend(
+        new_data=analyzer.DataTensors(media_spend=new_media_spend)
+    )
+    expected_all_spend = np.array([6, 9, 9.3])
+    self.assertAllClose(expected_all_spend, actual_hist_spend.data)
+
+  def test_get_aggregated_spend_selected_times_correct_values(self):
     # Set it to None to avoid the dimension checks on inference data.
     self.enter_context(
         mock.patch.object(
@@ -2151,11 +2456,13 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
     # The first two times are selected.
     selected_times = ["2021-01-25", "2021-02-01"]
 
-    actual_hist_spend = meridian_analyzer.get_historical_spend(selected_times)
+    actual_hist_spend = meridian_analyzer.get_aggregated_spend(
+        selected_times=selected_times
+    )
     expected_all_spend = np.array([2.1, 4.1, 6.1])
     self.assertAllClose(expected_all_spend, actual_hist_spend.data)
 
-  def test_get_historical_spend_with_single_dim_spends(self):
+  def test_get_aggregated_spend_with_single_dim_spends(self):
     seed = 0
     data = data_test_utils.sample_input_data_non_revenue_revenue_per_kpi(
         n_geos=_N_GEOS,
@@ -2186,7 +2493,9 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
     n_sub_times = 4
 
     selected_times = data.time.values[-n_sub_times:].tolist()
-    actual_hist_spends = meridian_analyzer.get_historical_spend(selected_times)
+    actual_hist_spends = meridian_analyzer.get_aggregated_spend(
+        selected_times=selected_times
+    )
 
     # The spend is interpolated based on the ratio of media execution in the
     # selected times to the media execution in the entire time period.
@@ -2210,20 +2519,19 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
 
     self.assertAllClose(expected_all_spend, actual_hist_spends.data)
 
-  def test_get_historical_spend_with_empty_times(self):
-    selected_times = []
-    actual = self.analyzer_media_and_rf.get_historical_spend(selected_times)
+  def test_get_aggregated_spend_with_empty_times(self):
+    actual = self.analyzer_media_and_rf.get_aggregated_spend(selected_times=[])
     self.assertAllEqual(
         actual.data, np.zeros((_N_MEDIA_CHANNELS + _N_RF_CHANNELS))
     )
 
-  def test_get_historical_spend_with_no_channel_selected(self):
+  def test_get_aggregated_spend_with_no_channel_selected(self):
     selected_times = self.input_data_media_and_rf.time.values.tolist()
 
     with self.assertRaisesRegex(
         ValueError, "At least one of include_media or include_rf must be True."
     ):
-      self.analyzer_media_and_rf.get_historical_spend(
+      self.analyzer_media_and_rf.get_aggregated_spend(
           selected_times, include_media=False, include_rf=False
       )
 
@@ -2530,6 +2838,20 @@ class AnalyzerMediaOnlyTest(tf.test.TestCase, parameterized.TestCase):
       new_data_dict.pop(missing_param)
       self.analyzer_media_only.incremental_outcome(
           new_data=analyzer.DataTensors(**new_data_dict)
+      )
+
+  def test_incremental_outcome_media_only_invalid_new_data_raises_exception(
+      self,
+  ):
+    with self.assertRaisesRegex(
+        ValueError,
+        "New `reach` is not allowed because the input data to the Meridian"
+        " model does not contain `reach`",
+    ):
+      self.analyzer_media_only.incremental_outcome(
+          new_data=analyzer.DataTensors(
+              reach=tf.ones((_N_GEOS, 10, _N_RF_CHANNELS)),
+          )
       )
 
   @parameterized.product(
@@ -2896,8 +3218,8 @@ class AnalyzerMediaOnlyTest(tf.test.TestCase, parameterized.TestCase):
     self.assertEqual(media_summary.baseline_outcome.shape, expected_shape)
     self.assertEqual(media_summary.pct_of_contribution.shape, expected_shape)
 
-  def test_get_historical_spend_correct_channel_names(self):
-    actual_hist_spend = self.analyzer_media_only.get_historical_spend(
+  def test_get_aggregated_spend_correct_channel_names(self):
+    actual_hist_spend = self.analyzer_media_only.get_aggregated_spend(
         selected_times=None, include_rf=False
     )
     expected_channel_names = self.input_data_media_only.get_all_paid_channels()
@@ -2906,22 +3228,18 @@ class AnalyzerMediaOnlyTest(tf.test.TestCase, parameterized.TestCase):
         expected_channel_names, actual_hist_spend.channel.data
     )
 
-  def test_get_historical_spend_requests_rf_when_no_rf_throws_warning(self):
-    selected_times = self.input_data_media_only.time.values.tolist()
+  def test_get_aggregated_spend_requests_rf_when_no_rf_throws_warning(self):
     with self.assertWarnsRegex(
         UserWarning,
-        "Requested spends for paid media channels with R&F data, but but the"
+        "Requested spends for paid media channels with R&F data, but the"
         " channels are not available.",
     ):
-      self.analyzer_media_only.get_historical_spend(selected_times)
+      self.analyzer_media_only.get_aggregated_spend()
 
-  def test_get_historical_spend_requests_rf_when_no_rf_outputs_empty_data_array(
+  def test_get_aggregated_spend_requests_rf_when_no_rf_outputs_empty_data_array(
       self,
   ):
-    selected_times = self.input_data_media_only.time.values.tolist()
-    actual = self.analyzer_media_only.get_historical_spend(
-        selected_times, include_media=False
-    )
+    actual = self.analyzer_media_only.get_aggregated_spend(include_media=False)
     self.assertAllEqual(actual.data, [])
 
 
@@ -3207,8 +3525,8 @@ class AnalyzerRFOnlyTest(tf.test.TestCase, parameterized.TestCase):
     total_spend = self.analyzer_rf_only.filter_and_aggregate_geos_and_times(
         self.meridian_rf_only.rf_tensors.rf_spend
     )
-    expeted_roi = self.analyzer_rf_only.incremental_outcome() / total_spend
-    self.assertAllClose(expeted_roi, roi)
+    expected_roi = self.analyzer_rf_only.incremental_outcome() / total_spend
+    self.assertAllClose(expected_roi, roi)
 
   def test_by_reach_returns_correct_values(self):
     mroi = self.analyzer_rf_only.marginal_roi(
@@ -3262,20 +3580,14 @@ class AnalyzerRFOnlyTest(tf.test.TestCase, parameterized.TestCase):
     )
     expected = xr.Dataset(
         coords={
-            constants.FREQUENCY: ([constants.FREQUENCY], [1.0, 2.0, 3.0]),
-            constants.RF_CHANNEL: (
-                [constants.RF_CHANNEL],
-                ["rf_ch_0", "rf_ch_1"],
-            ),
-            constants.METRIC: (
-                [constants.METRIC],
-                [
-                    constants.MEAN,
-                    constants.MEDIAN,
-                    constants.CI_LO,
-                    constants.CI_HI,
-                ],
-            ),
+            constants.FREQUENCY: [1.0, 2.0, 3.0],
+            constants.RF_CHANNEL: ["rf_ch_0", "rf_ch_1"],
+            constants.METRIC: [
+                constants.MEAN,
+                constants.MEDIAN,
+                constants.CI_LO,
+                constants.CI_HI,
+            ],
         },
         data_vars={
             constants.ROI: (
@@ -3306,15 +3618,8 @@ class AnalyzerRFOnlyTest(tf.test.TestCase, parameterized.TestCase):
             constants.OPTIMIZED_EFFECTIVENESS: (
                 [constants.RF_CHANNEL, constants.METRIC],
                 [
-                    [0.000604, 0.000458, 0.000146, 0.001189],
-                    [0.002804, 0.003047, 0.000166, 0.005135],
-                ],
-            ),
-            constants.OPTIMIZED_PCT_OF_CONTRIBUTION: (
-                [constants.RF_CHANNEL, constants.METRIC],
-                [
-                    [0.01613, 0.01225, 0.0039, 0.03179],
-                    [0.02505, 0.02721, 0.00149, 0.04587],
+                    [4.055367e-04, 3.081534e-04, 9.794392e-05, 7.991136e-04],
+                    [5.891235e-04, 6.401768e-04, 3.493646e-05, 1.078733e-03],
                 ],
             ),
             constants.OPTIMIZED_ROI: (
@@ -3332,8 +3637,8 @@ class AnalyzerRFOnlyTest(tf.test.TestCase, parameterized.TestCase):
             constants.OPTIMIZED_CPIK: (
                 [constants.RF_CHANNEL, constants.METRIC],
                 [
-                    [0.476, 0.48521742, 0.104, 0.849],
-                    [0.698, 0.231271, 0.076, 2.403],
+                    [1.496871, 1.523583, 0.329373, 2.666992],
+                    [2.191838, 0.726191, 0.239616, 7.546689],
                 ],
             ),
         },
@@ -3360,11 +3665,6 @@ class AnalyzerRFOnlyTest(tf.test.TestCase, parameterized.TestCase):
         actual.optimized_effectiveness,
         expected.optimized_effectiveness,
         atol=0.00001,
-    )
-    xr.testing.assert_allclose(
-        actual.optimized_pct_of_contribution,
-        expected.optimized_pct_of_contribution,
-        atol=0.0001,
     )
     xr.testing.assert_allclose(
         actual.optimized_roi,
@@ -3560,8 +3860,8 @@ class AnalyzerRFOnlyTest(tf.test.TestCase, parameterized.TestCase):
     self.assertEqual(media_summary.baseline_outcome.shape, expected_shape)
     self.assertEqual(media_summary.pct_of_contribution.shape, expected_shape)
 
-  def test_get_historical_spend_correct_channel_names(self):
-    actual_hist_spend = self.analyzer_rf_only.get_historical_spend(
+  def test_get_aggregated_spend_correct_channel_names(self):
+    actual_hist_spend = self.analyzer_rf_only.get_aggregated_spend(
         selected_times=None, include_media=False
     )
     expected_channel_names = self.input_data_rf_only.get_all_paid_channels()
@@ -3570,24 +3870,20 @@ class AnalyzerRFOnlyTest(tf.test.TestCase, parameterized.TestCase):
         expected_channel_names, actual_hist_spend.channel.data
     )
 
-  def test_get_historical_spend_requests_media_when_no_media_throws_warning(
+  def test_get_aggregated_spend_requests_media_when_no_media_throws_warning(
       self,
   ):
-    selected_times = self.input_data_rf_only.time.values.tolist()
     with self.assertWarnsRegex(
         UserWarning,
         "Requested spends for paid media channels that do not have R&F data,"
         " but the channels are not available.",
     ):
-      self.analyzer_rf_only.get_historical_spend(selected_times)
+      self.analyzer_rf_only.get_aggregated_spend()
 
-  def test_get_historical_spend_requests_rf_when_no_rf_outputs_empty_data_array(
+  def test_get_aggregated_spend_requests_rf_when_no_rf_outputs_empty_data_array(
       self,
   ):
-    selected_times = self.input_data_rf_only.time.values.tolist()
-    actual = self.analyzer_rf_only.get_historical_spend(
-        selected_times, include_rf=False
-    )
+    actual = self.analyzer_rf_only.get_aggregated_spend(include_rf=False)
     self.assertAllEqual(actual.data, [])
 
 
@@ -3721,7 +4017,7 @@ class AnalyzerKpiTest(tf.test.TestCase, parameterized.TestCase):
     ):
       self.analyzer_kpi.roi(use_kpi=False)
 
-  def test_use_kpi_no_revenue_per_kpi_correct_usage_response_curves(self):
+  def test_use_kpi_correct_usage_response_curves(self):
     mock_incremental_outcome = self.enter_context(
         mock.patch.object(
             self.analyzer_kpi,
@@ -3733,7 +4029,7 @@ class AnalyzerKpiTest(tf.test.TestCase, parameterized.TestCase):
             )),
         )
     )
-    self.analyzer_kpi.response_curves()
+    self.analyzer_kpi.response_curves(use_kpi=True)
     _, mock_kwargs = mock_incremental_outcome.call_args
     self.assertEqual(mock_kwargs["use_kpi"], True)
 
@@ -3779,20 +4075,14 @@ class AnalyzerKpiTest(tf.test.TestCase, parameterized.TestCase):
     )
     expected = xr.Dataset(
         coords={
-            constants.FREQUENCY: ([constants.FREQUENCY], [1.0, 2.0, 3.0]),
-            constants.RF_CHANNEL: (
-                [constants.RF_CHANNEL],
-                ["rf_ch_0", "rf_ch_1"],
-            ),
-            constants.METRIC: (
-                [constants.METRIC],
-                [
-                    constants.MEAN,
-                    constants.MEDIAN,
-                    constants.CI_LO,
-                    constants.CI_HI,
-                ],
-            ),
+            constants.FREQUENCY: [1.0, 2.0, 3.0],
+            constants.RF_CHANNEL: ["rf_ch_0", "rf_ch_1"],
+            constants.METRIC: [
+                constants.MEAN,
+                constants.MEDIAN,
+                constants.CI_LO,
+                constants.CI_HI,
+            ],
         },
         data_vars={
             constants.ROI: (
@@ -3820,13 +4110,6 @@ class AnalyzerKpiTest(tf.test.TestCase, parameterized.TestCase):
                     [611.12, 603.30, 158.21, 1080.15],
                 ],
             ),
-            constants.OPTIMIZED_PCT_OF_CONTRIBUTION: (
-                [constants.RF_CHANNEL, constants.METRIC],
-                [
-                    [5.1566, 5.1764145, 1.8069, 8.48342],
-                    [7.94896, 7.8473177, 2.05785, 14.04969],
-                ],
-            ),
             constants.OPTIMIZED_ROI: (
                 [constants.RF_CHANNEL, constants.METRIC],
                 [
@@ -3837,8 +4120,8 @@ class AnalyzerKpiTest(tf.test.TestCase, parameterized.TestCase):
             constants.OPTIMIZED_EFFECTIVENESS: (
                 [constants.RF_CHANNEL, constants.METRIC],
                 [
-                    [0.000541, 0.000543, 0.00019, 0.00089],
-                    [0.000832, 0.000821, 0.000215, 0.00147],
+                    [1.211769e-04, 1.216424e-04, 4.246090e-05, 1.993549e-04],
+                    [1.747521e-04, 1.725175e-04, 4.524036e-05, 3.088720e-04],
                 ],
             ),
             constants.OPTIMIZED_MROI_BY_REACH: (
@@ -3858,8 +4141,8 @@ class AnalyzerKpiTest(tf.test.TestCase, parameterized.TestCase):
             constants.OPTIMIZED_CPIK: (
                 [constants.RF_CHANNEL, constants.METRIC],
                 [
-                    [1.166, 1.139, 0.417, 1.959],
-                    [1.042, 1.038, 0.267, 1.82],
+                    [1.1664926, 1.1397777, 0.41729444, 1.9592067],
+                    [1.041547, 1.0384206, 0.26651454, 1.8195891],
                 ],
             ),
         },
@@ -3888,11 +4171,6 @@ class AnalyzerKpiTest(tf.test.TestCase, parameterized.TestCase):
         atol=0.000001,
     )
     xr.testing.assert_allclose(
-        actual.optimized_pct_of_contribution,
-        expected.optimized_pct_of_contribution,
-        atol=0.0001,
-    )
-    xr.testing.assert_allclose(
         actual.optimized_roi,
         expected.optimized_roi,
         atol=0.01,
@@ -3910,7 +4188,7 @@ class AnalyzerKpiTest(tf.test.TestCase, parameterized.TestCase):
     xr.testing.assert_allclose(
         actual.optimized_cpik,
         expected.optimized_cpik,
-        atol=0.001,
+        atol=0.01,
     )
     self.assertEqual(actual.confidence_level, expected.confidence_level)
     self.assertEqual(actual.use_posterior, expected.use_posterior)
@@ -3969,25 +4247,45 @@ class AnalyzerNonMediaTest(tf.test.TestCase, parameterized.TestCase):
           testcase_name="all_min",
           use_posterior=True,
           expected_result=test_utils.INC_OUTCOME_NON_MEDIA_USE_POSTERIOR,
-          non_media_baseline_values=["min", "min", "min", "min"],
+          non_media_baseline_values=[
+              -7.229473,
+              -7.1908092,
+              -3.0269506,
+              -6.3038673,
+          ],
       ),
       dict(
           testcase_name="all_max",
           use_posterior=True,
           expected_result=test_utils.INC_OUTCOME_NON_MEDIA_MAX,
-          non_media_baseline_values=["max", "max", "max", "max"],
+          non_media_baseline_values=[
+              14.567047,
+              15.695609,
+              11.22775,
+              14.682818,
+          ],
       ),
       dict(
           testcase_name="mix",
           use_posterior=True,
           expected_result=test_utils.INC_OUTCOME_NON_MEDIA_MIX,
-          non_media_baseline_values=["min", "max", "max", "min"],
+          non_media_baseline_values=[
+              -7.229473,
+              15.695609,
+              11.22775,
+              -6.3038673,
+          ],
       ),
       dict(
           testcase_name="mix_as_floats",
           use_posterior=True,
           expected_result=test_utils.INC_OUTCOME_NON_MEDIA_MIX,
-          non_media_baseline_values=["min", 3.630, 2.448, "min"],
+          non_media_baseline_values=[
+              -7.229473,
+              15.695609,
+              11.22775,
+              -6.3038673,
+          ],
       ),
       dict(
           testcase_name="all_fixed",
@@ -4000,15 +4298,15 @@ class AnalyzerNonMediaTest(tf.test.TestCase, parameterized.TestCase):
       self,
       use_posterior: bool,
       expected_result: np.ndarray,
-      non_media_baseline_values: Sequence[float | str] | None,
+      non_media_baseline_values: Sequence[float] | None,
   ):
     model.Meridian.inference_data = mock.PropertyMock(
         return_value=self.inference_data_non_media
     )
     outcome = self.analyzer_non_media.incremental_outcome(
         use_posterior=use_posterior,
-        non_media_baseline_values=non_media_baseline_values,
         include_non_paid_channels=True,
+        non_media_baseline_values=non_media_baseline_values,
     )
     self.assertAllClose(
         outcome,
@@ -4038,21 +4336,21 @@ class AnalyzerNonMediaTest(tf.test.TestCase, parameterized.TestCase):
     with self.assertRaisesWithLiteralMatch(
         ValueError,
         "The number of non-media channels (4) does not match the number of"
-        " baseline types (3).",
+        " baseline values (3).",
     ):
       self.analyzer_non_media.incremental_outcome(
-          non_media_baseline_values=["min", "max", "min"],
+          non_media_baseline_values=[13, -4, 2.8],
           include_non_paid_channels=True,
       )
 
   def test_incremental_outcome_wrong_baseline_type_raises_exception(self):
     with self.assertRaisesWithLiteralMatch(
         ValueError,
-        "Invalid non_media_baseline_values value: 'wrong'. Only float numbers"
-        " and strings 'min' and 'max' are supported.",
+        "Invalid `non_media_baseline_values` value: 'min'. Only float"
+        " numbers are supported.",
     ):
       self.analyzer_non_media.incremental_outcome(
-          non_media_baseline_values=["min", "max", "max", "wrong"],
+          non_media_baseline_values=["min", "max", "max", 5.0],
           include_non_paid_channels=True,
       )
 
@@ -4078,21 +4376,19 @@ class AnalyzerNonMediaTest(tf.test.TestCase, parameterized.TestCase):
     ) as mock_compute_incremental_outcome_aggregate:
       self.analyzer_non_media.summary_metrics(
           include_non_paid_channels=True,
-          non_media_baseline_values=[0.0, "max", 1.0, "min"],
+          non_media_baseline_values=[0.0, 7, 1.0, -1],
       )
 
     # Assert that _compute_incremental_outcome_aggregate was called the right
     # number of times with the right arguments.
-    self.assertEqual(mock_compute_incremental_outcome_aggregate.call_count, 2)
+    self.assertEqual(mock_compute_incremental_outcome_aggregate.call_count, 4)
 
     # Both calls with include_non_paid_channels=True and given
     # non_media_baseline_values
     for call in mock_compute_incremental_outcome_aggregate.call_args_list:
       _, kwargs = call
       self.assertEqual(kwargs["include_non_paid_channels"], True)
-      self.assertEqual(
-          kwargs["non_media_baseline_values"], [0.0, "max", 1.0, "min"]
-      )
+      self.assertEqual(kwargs["non_media_baseline_values"], [0.0, 7, 1.0, -1])
 
   def test_baseline_summary_metrics_with_non_media_baseline_values(self):
     # Call baseline_summary_metrics with non-default value of
@@ -4103,7 +4399,7 @@ class AnalyzerNonMediaTest(tf.test.TestCase, parameterized.TestCase):
         wraps=self.analyzer_non_media._calculate_baseline_expected_outcome,
     ) as mock_calculate_baseline_expected_outcome:
       self.analyzer_non_media.baseline_summary_metrics(
-          non_media_baseline_values=[0.0, "max", 1.0, "min"],
+          non_media_baseline_values=[0.0, 3, 1.0, 4.5],
       )
 
     # Assert that _calculate_baseline_expected_outcome was called the right
@@ -4111,9 +4407,7 @@ class AnalyzerNonMediaTest(tf.test.TestCase, parameterized.TestCase):
     self.assertEqual(mock_calculate_baseline_expected_outcome.call_count, 2)
     for call in mock_calculate_baseline_expected_outcome.call_args_list:
       _, kwargs = call
-      self.assertEqual(
-          kwargs["non_media_baseline_values"], [0.0, "max", 1.0, "min"]
-      )
+      self.assertEqual(kwargs["non_media_baseline_values"], [0.0, 3, 1.0, 4.5])
 
   def test_expected_vs_actual_with_non_media_baseline_values(self):
     # Call expected_vs_actual with non-default value of
@@ -4124,16 +4418,46 @@ class AnalyzerNonMediaTest(tf.test.TestCase, parameterized.TestCase):
         wraps=self.analyzer_non_media._calculate_baseline_expected_outcome,
     ) as mock_calculate_baseline_expected_outcome:
       self.analyzer_non_media.expected_vs_actual_data(
-          non_media_baseline_values=[0.0, "max", 1.0, "min"],
+          non_media_baseline_values=[0.0, 22, 1.0, 2.2],
       )
 
     # Assert that _calculate_baseline_expected_outcome was called the right
     # number of times with the right arguments.
     self.assertEqual(mock_calculate_baseline_expected_outcome.call_count, 1)
     _, kwargs = mock_calculate_baseline_expected_outcome.call_args
-    self.assertEqual(
-        kwargs["non_media_baseline_values"], [0.0, "max", 1.0, "min"]
-    )
+    self.assertEqual(kwargs["non_media_baseline_values"], [0.0, 22, 1.0, 2.2])
+
+  def test_incremental_outcome_impl_without_non_media_baseline_raises_exception(
+      self,
+  ):
+    with self.assertRaisesRegex(
+        ValueError,
+        "`non_media_treatments_baseline_normalized` must be passed to"
+        " `_incremental_outcome_impl` when `non_media_treatments` data is"
+        " present.",
+    ):
+      self.analyzer_non_media._incremental_outcome_impl(
+          data_tensors=analyzer.DataTensors(
+              non_media_treatments=self.meridian_non_media.non_media_treatments
+          ),
+          dist_tensors=analyzer.DistributionTensors(),
+      )
+
+  def test_get_incremental_kpi_without_non_media_baseline_raises_exception(
+      self,
+  ):
+    with self.assertRaisesRegex(
+        ValueError,
+        "`non_media_treatments_baseline_normalized` must be passed to"
+        " `_get_incremental_kpi` when `non_media_treatments` data is"
+        " present.",
+    ):
+      self.analyzer_non_media._get_incremental_kpi(
+          data_tensors=analyzer.DataTensors(
+              non_media_treatments=self.meridian_non_media.non_media_treatments
+          ),
+          dist_tensors=analyzer.DistributionTensors(),
+      )
 
 
 class AnalyzerOrganicMediaTest(tf.test.TestCase, parameterized.TestCase):
@@ -4239,7 +4563,7 @@ class AnalyzerOrganicMediaTest(tf.test.TestCase, parameterized.TestCase):
     )
 
     if not new_tensors_names:
-      new_data = None
+      new_data = analyzer.DataTensors()
     else:
       tensors = {}
       for tensor_name in new_tensors_names:
@@ -4261,9 +4585,8 @@ class AnalyzerOrganicMediaTest(tf.test.TestCase, parameterized.TestCase):
     if require_revenue_per_kpi:
       required_tensors_names.append(constants.REVENUE_PER_KPI)
 
-    filled_tensors = self.analyzer_non_paid._fill_missing_data_tensors(
-        new_data=new_data,
-        required_tensors_names=required_tensors_names,
+    filled_tensors = new_data.validate_and_fill_missing_data(
+        required_tensors_names, self.meridian_non_paid
     )
     for tensor_name in required_tensors_names:
       if tensor_name in new_tensors_names:
@@ -4562,8 +4885,8 @@ class AnalyzerOrganicMediaTest(tf.test.TestCase, parameterized.TestCase):
         ValueError,
         "If the time dimension of any variable in `new_data` is modified, then"
         " all variables must be provided with the same number of time periods."
-        " `new_data.reach` has 10 time periods and does not match"
-        " `new_data.media` which has 52 time periods.",
+        " `media` has 52 time periods, which does not match the modified number"
+        " of time periods, 10.",
     ):
       self.analyzer_non_paid.incremental_outcome(
           new_data=analyzer.DataTensors(**new_data_dict)
@@ -4680,6 +5003,163 @@ class AnalyzerOrganicMediaTest(tf.test.TestCase, parameterized.TestCase):
         test_utils.SAMPLE_BASELINE_PCT_OF_CONTRIBUTION_NON_PAID,
         atol=1e-2,
         rtol=1e-2,
+    )
+
+  def test_adstock_decay_includes_organic_channels(self):
+    df = self.analyzer_non_paid.adstock_decay()
+    actual_channels = df[constants.CHANNEL].unique()
+    expected_channels = [
+        "ch_0",
+        "ch_1",
+        "ch_2",
+        "rf_ch_0",
+        "rf_ch_1",
+        "organic_media_0",
+        "organic_media_1",
+        "organic_media_2",
+        "organic_media_3",
+    ]
+    self.assertSameElements(expected_channels, actual_channels)
+
+  def test_adstock_decay_organic_math_correct(self):
+    adstock_decay_dataframe = self.analyzer_non_paid.adstock_decay(
+        confidence_level=constants.DEFAULT_CONFIDENCE_LEVEL
+    )
+
+    target_organic_channel = "organic_media_0"
+    first_organic_channel_df = adstock_decay_dataframe[
+        adstock_decay_dataframe[constants.CHANNEL] == target_organic_channel
+    ]
+
+    first_organic_channel_df = first_organic_channel_df.sort_values(
+        by=[constants.DISTRIBUTION, constants.TIME_UNITS],
+        ascending=[
+            False,
+            True,
+        ],
+    )
+
+    self.assertAllClose(
+        list(first_organic_channel_df[constants.CI_HI])[:5],
+        test_utils.ORGANIC_ADSTOCK_DECAY_CI_HI,
+        atol=1e-3,
+    )
+
+    self.assertAllClose(
+        list(first_organic_channel_df[constants.CI_LO])[:5],
+        test_utils.ORGANIC_ADSTOCK_DECAY_CI_LO,
+        atol=1e-3,
+    )
+
+    self.assertAllClose(
+        list(first_organic_channel_df[constants.MEAN])[:5],
+        test_utils.ORGANIC_ADSTOCK_DECAY_MEAN,
+        atol=1e-3,
+    )
+
+  def test_hill_curves_dataframe_properties(self):
+    hill_table = self.analyzer_non_paid.hill_curves()
+    hist_df = hill_table[hill_table[constants.COUNT_HISTOGRAM].notna()]
+
+    expected_columns = [
+        constants.CHANNEL,
+        constants.MEDIA_UNITS,
+        constants.DISTRIBUTION,
+        constants.CI_HI,
+        constants.CI_LO,
+        constants.MEAN,
+        constants.CHANNEL_TYPE,
+        constants.SCALED_COUNT_HISTOGRAM,
+        constants.COUNT_HISTOGRAM,
+        constants.START_INTERVAL_HISTOGRAM,
+        constants.END_INTERVAL_HISTOGRAM,
+    ]
+    self.assertListEqual(list(hill_table.columns), expected_columns)
+
+    all_channels_present = set(hill_table[constants.CHANNEL].unique())
+    expected_paid_media = {"ch_0", "ch_1", "ch_2"}
+    expected_rf = {"rf_ch_0", "rf_ch_1"}
+    expected_organic_media = {
+        "organic_media_0",
+        "organic_media_1",
+        "organic_media_2",
+        "organic_media_3",
+    }
+    self.assertTrue(expected_paid_media.issubset(all_channels_present))
+    self.assertTrue(expected_rf.issubset(all_channels_present))
+    self.assertTrue(expected_organic_media.issubset(all_channels_present))
+    self.assertSetEqual(
+        set(
+            hill_table[hill_table[constants.CHANNEL_TYPE] == constants.MEDIA][
+                constants.CHANNEL
+            ].unique()
+        ),
+        expected_paid_media,
+    )
+    self.assertSetEqual(
+        set(
+            hill_table[hill_table[constants.CHANNEL_TYPE] == constants.RF][
+                constants.CHANNEL
+            ].unique()
+        ),
+        expected_rf,
+    )
+    self.assertSetEqual(
+        set(
+            hill_table[
+                hill_table[constants.CHANNEL_TYPE] == constants.ORGANIC_MEDIA
+            ][constants.CHANNEL].unique()
+        ),
+        expected_organic_media,
+    )
+    self.assertTrue(hist_df.index.is_unique)
+
+  def test_hill_curves_curve_data_correct(self):
+    hill_table = self.analyzer_non_paid.hill_curves()
+
+    organic_channel = "organic_media_1"
+    organic_df = (
+        hill_table[
+            (hill_table[constants.CHANNEL] == organic_channel)
+            & (hill_table[constants.DISTRIBUTION] == constants.POSTERIOR)
+        ]
+        .sort_values(constants.MEDIA_UNITS)
+        .dropna(subset=[constants.MEAN])
+    )
+
+    self.assertFalse(organic_df.empty)
+    self.assertEqual(
+        organic_df[constants.CHANNEL_TYPE].iloc[0], constants.ORGANIC_MEDIA
+    )
+    self.assertTrue(organic_df[constants.MEAN].is_monotonic_increasing)
+    self.assertLessEqual(organic_df[constants.MEAN].iloc[-1], 1.0)
+    self.assertGreaterEqual(organic_df[constants.MEAN].iloc[0], 0.0)
+    self.assertLess(organic_df[constants.MEDIA_UNITS].iloc[0], 0.1)
+    self.assertAlmostEqual(organic_df[constants.MEAN].iloc[0], 0.0, delta=1e-3)
+
+  def test_hill_curves_histogram_data_correct(self):
+    n_bins = 25
+    hill_table = self.analyzer_non_paid.hill_curves(n_bins=n_bins)
+
+    organic_channel = "organic_media_0"
+    organic_hist_df = hill_table[
+        hill_table[constants.CHANNEL] == organic_channel
+    ].dropna(subset=[constants.COUNT_HISTOGRAM])
+
+    self.assertFalse(organic_hist_df.empty)
+    self.assertLen(organic_hist_df, n_bins)
+    self.assertEqual(
+        organic_hist_df[constants.CHANNEL_TYPE].iloc[0], constants.ORGANIC_MEDIA
+    )
+    self.assertTrue((organic_hist_df[constants.COUNT_HISTOGRAM] >= 0).all())
+    self.assertTrue(
+        (organic_hist_df[constants.SCALED_COUNT_HISTOGRAM] <= 1.0001).all()
+    )
+    np.testing.assert_allclose(
+        organic_hist_df[constants.START_INTERVAL_HISTOGRAM].iloc[1:].values,
+        organic_hist_df[constants.END_INTERVAL_HISTOGRAM].iloc[:-1].values,
+        atol=1e-6,
+        err_msg="Histogram bin start/end edges do not align correctly.",
     )
 
 
